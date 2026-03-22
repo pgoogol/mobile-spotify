@@ -1,0 +1,6 @@
+-keep class com.spotify.** { *; }
+-keep interface com.spotify.** { *; }
+-dontwarn com.spotify.**
+-keep class com.google.gson.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
