@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "SpotifyPlaylistManager"
 include(":app")
+include(":shared")          // ← NOWE

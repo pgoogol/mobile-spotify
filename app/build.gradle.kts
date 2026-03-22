@@ -51,6 +51,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":shared"))              // ← Etap 2: shared module
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
