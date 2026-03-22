@@ -129,7 +129,7 @@ fun SettingsScreen(
                 SettingsInfoRow(
                     icon  = Icons.Default.Info,
                     label = "Wersja",
-                    value = "1.0.0"
+                    value = "0.2.0"
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                 SettingsInfoRow(

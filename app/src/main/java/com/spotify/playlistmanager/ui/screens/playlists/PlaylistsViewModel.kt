@@ -10,6 +10,20 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+// ── Tryb widoku ───────────────────────────────────────────────────────────────
+
+enum class ViewMode { LIST, GRID }
+
+// ── Opcje sortowania ──────────────────────────────────────────────────────────
+
+enum class PlaylistSortOption(val label: String) {
+    DEFAULT("Domyślna"),
+    NAME("Nazwa"),
+    TRACK_COUNT("Utwory")
+}
+
+// ── Stan ekranu ───────────────────────────────────────────────────────────────
+
 sealed class PlaylistsUiState {
     data object Loading : PlaylistsUiState()
     data class  Success(val playlists: List<Playlist>) : PlaylistsUiState()
@@ -27,35 +41,49 @@ class PlaylistsViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private var allPlaylists: List<Playlist> = emptyList()
+    private val _sortOption = MutableStateFlow(PlaylistSortOption.DEFAULT)
+    val sortOption: StateFlow<PlaylistSortOption> = _sortOption.asStateFlow()
 
-    /** Przefiltrowane playlisty wg searchQuery */
+    private val _sortReverse = MutableStateFlow(false)
+    val sortReverse: StateFlow<Boolean> = _sortReverse.asStateFlow()
+
+    private val _viewMode = MutableStateFlow(ViewMode.LIST)
+    val viewMode: StateFlow<ViewMode> = _viewMode.asStateFlow()
+
+    /** Przefiltrowane i posortowane playlisty */
     @OptIn(FlowPreview::class)
-    val filteredPlaylists: StateFlow<List<Playlist>> = _searchQuery
-        .debounce(200)
-        .combine(_uiState) { query, state ->
-            if (state is PlaylistsUiState.Success) {
-                if (query.isBlank()) state.playlists
-                else state.playlists.filter {
-                    it.name.contains(query, ignoreCase = true) ||
-                    (it.description?.contains(query, ignoreCase = true) == true)
-                }
-            } else emptyList()
+    val filteredPlaylists: StateFlow<List<Playlist>> =
+        combine(
+            _searchQuery.debounce(200),
+            _uiState,
+            _sortOption,
+            _sortReverse
+        ) { query, state, sort, reverse ->
+            if (state !is PlaylistsUiState.Success) return@combine emptyList()
+
+            var list = if (query.isBlank()) state.playlists
+            else state.playlists.filter {
+                it.name.contains(query, ignoreCase = true) ||
+                (it.description?.contains(query, ignoreCase = true) == true)
+            }
+
+            list = when (sort) {
+                PlaylistSortOption.DEFAULT     -> list
+                PlaylistSortOption.NAME        -> list.sortedBy { it.name.lowercase() }
+                PlaylistSortOption.TRACK_COUNT -> list.sortedByDescending { it.trackCount }
+            }
+
+            if (reverse) list.reversed() else list
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    init {
-        loadPlaylists()
-    }
+    init { loadPlaylists() }
 
     fun loadPlaylists() {
         _uiState.value = PlaylistsUiState.Loading
         viewModelScope.launch {
             runCatching { repository.getUserPlaylists() }
-                .onSuccess { playlists ->
-                    allPlaylists = playlists
-                    _uiState.value = PlaylistsUiState.Success(playlists)
-                }
+                .onSuccess { _uiState.value = PlaylistsUiState.Success(it) }
                 .onFailure { e ->
                     _uiState.value = PlaylistsUiState.Error(
                         e.message ?: "Błąd pobierania playlist"
@@ -64,7 +92,18 @@ class PlaylistsViewModel @Inject constructor(
         }
     }
 
-    fun onSearchQueryChange(query: String) {
-        _searchQuery.value = query
+    fun onSearchQueryChange(query: String) { _searchQuery.value = query }
+
+    fun onSortOption(option: PlaylistSortOption) {
+        if (_sortOption.value == option) {
+            _sortReverse.value = !_sortReverse.value
+        } else {
+            _sortOption.value  = option
+            _sortReverse.value = false
+        }
+    }
+
+    fun toggleViewMode() {
+        _viewMode.value = if (_viewMode.value == ViewMode.LIST) ViewMode.GRID else ViewMode.LIST
     }
 }
