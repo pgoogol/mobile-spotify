@@ -3,8 +3,7 @@ package com.spotify.playlistmanager.ui.screens.settings
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
-import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ITrackFeaturesCache
 import com.spotify.playlistmanager.util.LocalCsvImportHelper
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,7 +22,7 @@ data class SettingsUiState(
 class SettingsViewModel @Inject constructor(
     private val tokenManager: TokenManager,
     private val csvHelper:    LocalCsvImportHelper,
-    private val dao:          TrackFeaturesDao
+    private val cache:        ITrackFeaturesCache
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -57,7 +56,7 @@ class SettingsViewModel @Inject constructor(
 
     fun clearCache() {
         viewModelScope.launch {
-            dao.clear()
+            cache.clear()
             _state.update { it.copy(cacheCount = 0, importMessage = "🗑️ Cache wyczyszczony") }
         }
     }
@@ -72,7 +71,7 @@ class SettingsViewModel @Inject constructor(
 
     private fun refreshCacheCount() {
         viewModelScope.launch {
-            _state.update { it.copy(cacheCount = dao.count()) }
+            _state.update { it.copy(cacheCount = cache.count()) }
         }
     }
 }

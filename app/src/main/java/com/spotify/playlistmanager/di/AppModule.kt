@@ -8,6 +8,10 @@ import com.spotify.playlistmanager.data.api.AuthInterceptor
 import com.spotify.playlistmanager.data.api.SpotifyApiService
 import com.spotify.playlistmanager.data.cache.AppDatabase
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
+import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ITrackFeaturesCache
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -75,4 +79,16 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTrackFeaturesDao(db: AppDatabase): TrackFeaturesDao = db.trackFeaturesDao()
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class AppBindings {
+    @Binds
+    @Singleton
+    abstract fun bindSpotifyRepository(impl: SpotifyRepository): ISpotifyRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindTrackFeaturesCache(impl: TrackFeaturesDao): ITrackFeaturesCache
 }

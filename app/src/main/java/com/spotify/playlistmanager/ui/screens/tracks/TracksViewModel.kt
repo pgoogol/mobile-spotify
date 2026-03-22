@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.PlaylistStats
 import com.spotify.playlistmanager.data.model.Track
-import com.spotify.playlistmanager.data.repository.PlaylistGeneratorEngine
-import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
+import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -27,7 +27,7 @@ enum class SortColumn(val label: String) {
 
 @HiltViewModel
 class TracksViewModel @Inject constructor(
-    private val repository: SpotifyRepository
+    private val repository: ISpotifyRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TracksUiState(isLoading = true))
@@ -59,14 +59,14 @@ class TracksViewModel @Inject constructor(
             // sortowanie
             if (col != null) {
                 val sorted = when (col) {
-                    SortColumn.TITLE       -> list.sortedBy { it.title.lowercase() }
-                    SortColumn.ARTIST      -> list.sortedBy { it.artist.lowercase() }
-                    SortColumn.ALBUM       -> list.sortedBy { it.album.lowercase() }
-                    SortColumn.DURATION    -> list.sortedBy { it.durationMs }
-                    SortColumn.POPULARITY  -> list.sortedByDescending { it.popularity }
-                    SortColumn.BPM         -> list.sortedByDescending { it.tempo ?: 0f }
-                    SortColumn.DANCEABILITY-> list.sortedByDescending { it.danceability ?: 0f }
-                    SortColumn.ENERGY      -> list.sortedByDescending { it.energy ?: 0f }
+                    SortColumn.TITLE        -> list.sortedBy { it.title.lowercase() }
+                    SortColumn.ARTIST       -> list.sortedBy { it.artist.lowercase() }
+                    SortColumn.ALBUM        -> list.sortedBy { it.album.lowercase() }
+                    SortColumn.DURATION     -> list.sortedBy { it.durationMs }
+                    SortColumn.POPULARITY   -> list.sortedByDescending { it.popularity }
+                    SortColumn.BPM          -> list.sortedByDescending { it.tempo ?: 0f }
+                    SortColumn.DANCEABILITY -> list.sortedByDescending { it.danceability ?: 0f }
+                    SortColumn.ENERGY       -> list.sortedByDescending { it.energy ?: 0f }
                 }
                 list = if (rev) sorted.reversed() else sorted
             }
@@ -77,7 +77,7 @@ class TracksViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = TracksUiState(isLoading = true)
             runCatching {
-                if (playlistId == PlaylistGeneratorEngine.LIKED_SONGS_ID)
+                if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
                     repository.getLikedTracks()
                 else
                     repository.getPlaylistTracks(playlistId)
@@ -105,10 +105,10 @@ class TracksViewModel @Inject constructor(
 
     // ── Statystyki (odpowiednik update_playlist_stats) ─────────────────────
     private fun computeStats(tracks: List<Track>): PlaylistStats {
-        val bpms    = tracks.mapNotNull { it.tempo }
+        val bpms     = tracks.mapNotNull { it.tempo }
         val energies = tracks.mapNotNull { it.energy }
-        val dances  = tracks.mapNotNull { it.danceability }
-        val total   = tracks.sumOf { it.durationMs.toLong() }
+        val dances   = tracks.mapNotNull { it.danceability }
+        val total    = tracks.sumOf { it.durationMs.toLong() }
         return PlaylistStats(
             trackCount      = tracks.size,
             totalDurationMs = total,

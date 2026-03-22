@@ -3,8 +3,8 @@ package com.spotify.playlistmanager.ui.screens.generate
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.*
-import com.spotify.playlistmanager.data.repository.PlaylistGeneratorEngine
-import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
+import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -25,8 +25,8 @@ data class GenerateUiState(
 
 @HiltViewModel
 class GenerateViewModel @Inject constructor(
-    private val repository: SpotifyRepository,
-    private val engine:     PlaylistGeneratorEngine
+    private val repository: ISpotifyRepository,
+    private val generatePlaylist: GeneratePlaylistUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(GenerateUiState())
@@ -42,7 +42,7 @@ class GenerateViewModel @Inject constructor(
                 .onSuccess { playlists ->
                     // Dodaj wirtualną "Polubione" na początku
                     val likedPlaylist = Playlist(
-                        id = PlaylistGeneratorEngine.LIKED_SONGS_ID,
+                        id = GeneratePlaylistUseCase.LIKED_SONGS_ID,
                         name = "❤ Polubione utwory",
                         description = null,
                         imageUrl = null,
@@ -91,7 +91,7 @@ class GenerateViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _state.update { it.copy(isGenerating = true, error = null, previewTracks = null) }
-            runCatching { engine.generate(sources) }
+            runCatching { generatePlaylist(sources) }
                 .onSuccess { tracks ->
                     _state.update { it.copy(isGenerating = false, previewTracks = tracks) }
                 }

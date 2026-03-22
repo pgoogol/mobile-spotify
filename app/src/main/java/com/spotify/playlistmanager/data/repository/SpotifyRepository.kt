@@ -3,6 +3,7 @@ package com.spotify.playlistmanager.data.repository
 import com.spotify.playlistmanager.data.api.SpotifyApiService
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.model.*
+import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.util.TokenManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,7 +23,7 @@ class SpotifyRepository @Inject constructor(
     private val api: SpotifyApiService,
     private val dao: TrackFeaturesDao,
     private val tokenManager: TokenManager
-) {
+) : ISpotifyRepository {
 
     // ════════════════════════════════════════════════════════
     //  Playlisty użytkownika
@@ -32,7 +33,7 @@ class SpotifyRepository @Inject constructor(
      * Pobiera WSZYSTKIE playlisty użytkownika (automatyczna paginacja).
      * Zwraca tylko playlisty których właścicielem jest zalogowany user.
      */
-    suspend fun getUserPlaylists(): List<Playlist> = withContext(Dispatchers.IO) {
+    override suspend fun getUserPlaylists(): List<Playlist> = withContext(Dispatchers.IO) {
         val userId = tokenManager.getUserId() ?: ""
         val all = mutableListOf<SpotifyPlaylist>()
         var offset = 0
@@ -57,7 +58,7 @@ class SpotifyRepository @Inject constructor(
      * Pobiera WSZYSTKIE utwory z playlisty (automatyczna paginacja)
      * i wzbogaca je o audio features z cache lub API.
      */
-    suspend fun getPlaylistTracks(playlistId: String): List<Track> =
+    override suspend fun getPlaylistTracks(playlistId: String): List<Track> =
         withContext(Dispatchers.IO) {
             val items = fetchAllPlaylistItems(playlistId)
             enrichWithFeatures(items)
@@ -66,7 +67,7 @@ class SpotifyRepository @Inject constructor(
     /**
      * Polubione utwory użytkownika.
      */
-    suspend fun getLikedTracks(): List<Track> = withContext(Dispatchers.IO) {
+    override suspend fun getLikedTracks(): List<Track> = withContext(Dispatchers.IO) {
         val items = mutableListOf<PlaylistTrackItem>()
         var offset = 0
         do {
@@ -81,7 +82,7 @@ class SpotifyRepository @Inject constructor(
     //  Tworzenie playlisty
     // ════════════════════════════════════════════════════════
 
-    suspend fun createPlaylist(name: String, description: String = ""): String =
+    override suspend fun createPlaylist(name: String, description: String): String =
         withContext(Dispatchers.IO) {
             val userId = tokenManager.getUserId()
                 ?: api.getCurrentUser().also { tokenManager.saveUserInfo(it.id, it.display_name) }.id
@@ -92,7 +93,7 @@ class SpotifyRepository @Inject constructor(
             response.id
         }
 
-    suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>) =
+    override suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>) =
         withContext(Dispatchers.IO) {
             // Spotify API akceptuje max 100 URI na jedno żądanie
             uris.chunked(100).forEach { chunk ->
@@ -104,13 +105,13 @@ class SpotifyRepository @Inject constructor(
     //  Profil użytkownika
     // ════════════════════════════════════════════════════════
 
-    suspend fun fetchAndCacheCurrentUser(): SpotifyUser = withContext(Dispatchers.IO) {
+    override suspend fun fetchAndCacheCurrentUser(): SpotifyUser = withContext(Dispatchers.IO) {
         val user = api.getCurrentUser()
         tokenManager.saveUserInfo(user.id, user.display_name)
         user
     }
 
-    suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
+    override suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
         val user = api.getCurrentUser()
         UserProfile(
             id          = user.id,
@@ -122,7 +123,7 @@ class SpotifyRepository @Inject constructor(
         )
     }
 
-    suspend fun getTopArtists(): List<TopArtist> = withContext(Dispatchers.IO) {
+    override suspend fun getTopArtists(): List<TopArtist> = withContext(Dispatchers.IO) {
         runCatching {
             api.getTopArtists(limit = 20).items.map { artist ->
                 TopArtist(
@@ -136,7 +137,7 @@ class SpotifyRepository @Inject constructor(
         }.getOrElse { emptyList() }
     }
 
-    suspend fun getLikedTracksCount(): Int = withContext(Dispatchers.IO) {
+    override suspend fun getLikedTracksCount(): Int = withContext(Dispatchers.IO) {
         runCatching {
             api.getLikedTracks(limit = 1, offset = 0).total
         }.getOrElse { 0 }
@@ -146,7 +147,7 @@ class SpotifyRepository @Inject constructor(
     //  Cache cech audio
     // ════════════════════════════════════════════════════════
 
-    suspend fun getCachedFeaturesCount(): Int = withContext(Dispatchers.IO) {
+    override suspend fun getCachedFeaturesCount(): Int = withContext(Dispatchers.IO) {
         dao.count()
     }
 

@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.TopArtist
 import com.spotify.playlistmanager.data.model.UserProfile
-import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,17 +14,17 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ProfileUiState(
-    val isLoading:     Boolean      = true,
-    val profile:       UserProfile? = null,
+    val isLoading:     Boolean         = true,
+    val profile:       UserProfile?    = null,
     val topArtists:    List<TopArtist> = emptyList(),
-    val playlistCount: Int          = 0,
-    val likedCount:    Int          = 0,
-    val error:         String?      = null
+    val playlistCount: Int             = 0,
+    val likedCount:    Int             = 0,
+    val error:         String?         = null
 )
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    private val repository: SpotifyRepository
+    private val repository: ISpotifyRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(ProfileUiState())
