@@ -46,7 +46,8 @@ class LoginViewModel @Inject constructor(
             "playlist-modify-public",
             "playlist-modify-private",
             "user-read-private",
-            "user-read-email"
+            "user-read-email",
+            "user-top-read"
         )
     }
 

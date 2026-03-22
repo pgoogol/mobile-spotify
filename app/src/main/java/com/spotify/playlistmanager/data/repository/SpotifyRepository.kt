@@ -110,6 +110,38 @@ class SpotifyRepository @Inject constructor(
         user
     }
 
+    suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
+        val user = api.getCurrentUser()
+        UserProfile(
+            id          = user.id,
+            displayName = user.display_name,
+            email       = user.email,
+            imageUrl    = user.images.firstOrNull()?.url,
+            country     = user.country,
+            followers   = user.followers?.total ?: 0
+        )
+    }
+
+    suspend fun getTopArtists(): List<TopArtist> = withContext(Dispatchers.IO) {
+        runCatching {
+            api.getTopArtists(limit = 20).items.map { artist ->
+                TopArtist(
+                    id         = artist.id,
+                    name       = artist.name,
+                    imageUrl   = artist.images.firstOrNull()?.url,
+                    genres     = artist.genres,
+                    popularity = artist.popularity
+                )
+            }
+        }.getOrElse { emptyList() }
+    }
+
+    suspend fun getLikedTracksCount(): Int = withContext(Dispatchers.IO) {
+        runCatching {
+            api.getLikedTracks(limit = 1, offset = 0).total
+        }.getOrElse { 0 }
+    }
+
     // ════════════════════════════════════════════════════════
     //  Cache cech audio
     // ════════════════════════════════════════════════════════

@@ -46,6 +46,14 @@ interface SpotifyApiService {
     @GET("v1/me")
     suspend fun getCurrentUser(): SpotifyUser
 
+    // ── Top artyści użytkownika ─────────────────────────────────────────────
+
+    @GET("v1/me/top/artists")
+    suspend fun getTopArtists(
+        @Query("limit")      limit:     Int    = 20,
+        @Query("time_range") timeRange: String = "short_term"
+    ): TopArtistsResponse
+
     // ── Tworzenie playlist ─────────────────────────────────────────────────
 
     @POST("v1/users/{user_id}/playlists")

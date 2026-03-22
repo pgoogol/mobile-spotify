@@ -1,14 +1,30 @@
 package com.spotify.playlistmanager.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.spotify.playlistmanager.ui.screens.generate.GenerateScreen
 import com.spotify.playlistmanager.ui.screens.login.LoginScreen
 import com.spotify.playlistmanager.ui.screens.playlists.PlaylistsScreen
+import com.spotify.playlistmanager.ui.screens.profile.ProfileScreen
 import com.spotify.playlistmanager.ui.screens.settings.SettingsScreen
 import com.spotify.playlistmanager.ui.screens.tracks.TracksScreen
+import com.spotify.playlistmanager.ui.theme.SpotifyGreen
+
+// ── Definicje ekranów ────────────────────────────────────────────────────────
 
 sealed class Screen(val route: String) {
     data object Login     : Screen("login")
@@ -17,9 +33,104 @@ sealed class Screen(val route: String) {
         fun createRoute(id: String, name: String) =
             "tracks/${java.net.URLEncoder.encode(id, "UTF-8")}/${java.net.URLEncoder.encode(name, "UTF-8")}"
     }
-    data object Generate  : Screen("generate")
-    data object Settings  : Screen("settings")
+    data object Generate : Screen("generate")
+    data object Settings : Screen("settings")
+    data object Profile  : Screen("profile")
 }
+
+// ── Zakładki dolnej nawigacji ────────────────────────────────────────────────
+
+private data class BottomNavItem(
+    val screen: Screen,
+    val label:  String,
+    val icon:   androidx.compose.ui.graphics.vector.ImageVector
+)
+
+private val bottomNavItems = listOf(
+    BottomNavItem(Screen.Playlists, "Playlisty",  Icons.Default.LibraryMusic),
+    BottomNavItem(Screen.Generate,  "Generuj",    Icons.Default.AutoAwesome),
+    BottomNavItem(Screen.Profile,   "Profil",     Icons.Default.Person)
+)
+
+// Ekrany z widocznym BottomBar
+private val bottomBarRoutes = setOf(
+    Screen.Playlists.route,
+    Screen.Generate.route,
+    Screen.Profile.route
+)
+
+// ── Główny szkielet z BottomNavigationBar ────────────────────────────────────
+
+@Composable
+fun AppScaffold(
+    navController:    NavHostController,
+    startDestination: String,
+    bottomContent:    @Composable () -> Unit = {}   // slot dla NowPlayingBar
+) {
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute      = navBackStackEntry?.destination?.route
+
+    val showBottomBar = currentRoute in bottomBarRoutes
+
+    Scaffold(
+        bottomBar = {
+            if (showBottomBar) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp
+                ) {
+                    bottomNavItems.forEach { item ->
+                        val selected = currentRoute == item.screen.route
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick  = {
+                                if (!selected) {
+                                    navController.navigate(item.screen.route) {
+                                        popUpTo(Screen.Playlists.route) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState    = true
+                                    }
+                                }
+                            },
+                            icon  = {
+                                Icon(item.icon, contentDescription = item.label)
+                            },
+                            label = {
+                                Text(
+                                    text  = item.label,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = if (selected) FontWeight.Bold
+                                                     else FontWeight.Normal
+                                    )
+                                )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor   = SpotifyGreen,
+                                selectedTextColor   = SpotifyGreen,
+                                indicatorColor      = SpotifyGreen.copy(alpha = 0.15f)
+                            )
+                        )
+                    }
+                }
+            } else {
+                // NowPlayingBar lub nic
+                bottomContent()
+            }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding)
+        ) {
+            AppNavGraph(
+                navController    = navController,
+                startDestination = startDestination
+            )
+        }
+    }
+}
+
+// ── Graf nawigacji ────────────────────────────────────────────────────────────
 
 @Composable
 fun AppNavGraph(
@@ -72,5 +183,12 @@ fun AppNavGraph(
                 }
             )
         }
+
+        composable(Screen.Profile.route) {
+            ProfileScreen()
+        }
     }
 }
+
+// Rozszerzenie dla dp w NavigationBar (Scaffold slot)
+private val Int.dp get() = androidx.compose.ui.unit.Dp(this.toFloat())

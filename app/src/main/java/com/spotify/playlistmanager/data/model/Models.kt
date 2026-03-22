@@ -80,10 +80,12 @@ data class AudioFeatures(
 data class AudioFeaturesResponse(val audio_features: List<AudioFeatures?>)
 
 data class SpotifyUser(
-    val id: String,
+    val id:           String,
     val display_name: String?,
-    val email: String?,
-    val images: List<SpotifyImage>
+    val email:        String?,
+    val images:       List<SpotifyImage>,
+    val country:      String?       = null,
+    val followers:    FollowersRef? = null
 )
 
 data class CreatePlaylistRequest(
@@ -101,6 +103,25 @@ data class CreatePlaylistResponse(
 )
 
 data class ExternalUrls(val spotify: String)
+
+// ── Top artyści – odpowiedź API ───────────────────────────────────────────────
+
+data class TopArtistsResponse(
+    val items: List<SpotifyArtistFull>,
+    val next:  String?,
+    val total: Int
+)
+
+data class SpotifyArtistFull(
+    val id:         String,
+    val name:       String,
+    val images:     List<SpotifyImage>,
+    val genres:     List<String>,
+    val popularity: Int,
+    val followers:  FollowersRef
+)
+
+data class FollowersRef(val total: Int)
 
 // ════════════════════════════════════════════════════════════
 //  Modele domenowe UI
@@ -156,6 +177,27 @@ data class PlaylistStats(
         else "%d:%02d".format(minutes, seconds)
     }
 }
+
+// ── Profil użytkownika ────────────────────────────────────────────────────────
+
+data class UserProfile(
+    val id:          String,
+    val displayName: String?,
+    val email:       String?,
+    val imageUrl:    String?,
+    val country:     String?,
+    val followers:   Int
+)
+
+// ── Top artysta ───────────────────────────────────────────────────────────────
+
+data class TopArtist(
+    val id:         String,
+    val name:       String,
+    val imageUrl:   String?,
+    val genres:     List<String>,
+    val popularity: Int
+)
 
 // ════════════════════════════════════════════════════════════
 //  Modele generatora playlist
