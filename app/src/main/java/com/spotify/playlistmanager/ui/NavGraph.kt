@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,12 +48,11 @@ private data class BottomNavItem(
 )
 
 private val bottomNavItems = listOf(
-    BottomNavItem(Screen.Playlists, "Playlisty",  Icons.Default.LibraryMusic),
-    BottomNavItem(Screen.Generate,  "Generuj",    Icons.Default.AutoAwesome),
-    BottomNavItem(Screen.Profile,   "Profil",     Icons.Default.Person)
+    BottomNavItem(Screen.Playlists, "Playlisty", Icons.Default.LibraryMusic),
+    BottomNavItem(Screen.Generate,  "Generuj",   Icons.Default.AutoAwesome),
+    BottomNavItem(Screen.Profile,   "Profil",    Icons.Default.Person)
 )
 
-// Ekrany z widocznym BottomBar
 private val bottomBarRoutes = setOf(
     Screen.Playlists.route,
     Screen.Generate.route,
@@ -65,16 +65,16 @@ private val bottomBarRoutes = setOf(
 fun AppScaffold(
     navController:    NavHostController,
     startDestination: String,
-    bottomContent:    @Composable () -> Unit = {}   // slot dla NowPlayingBar
+    bottomContent:    @Composable () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute      = navBackStackEntry?.destination?.route
-
-    val showBottomBar = currentRoute in bottomBarRoutes
+    val showBottomBar     = currentRoute in bottomBarRoutes
 
     Scaffold(
         bottomBar = {
             if (showBottomBar) {
+                // tonalElevation używa standardowego 8.dp z importu androidx.compose.ui.unit
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surface,
                     tonalElevation = 8.dp
@@ -92,40 +92,35 @@ fun AppScaffold(
                                     }
                                 }
                             },
-                            icon  = {
-                                Icon(item.icon, contentDescription = item.label)
-                            },
+                            icon  = { Icon(item.icon, contentDescription = item.label) },
                             label = {
                                 Text(
                                     text  = item.label,
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = if (selected) FontWeight.Bold
-                                                     else FontWeight.Normal
+                                        else FontWeight.Normal
                                     )
                                 )
                             },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor   = SpotifyGreen,
-                                selectedTextColor   = SpotifyGreen,
-                                indicatorColor      = SpotifyGreen.copy(alpha = 0.15f)
+                                selectedIconColor = SpotifyGreen,
+                                selectedTextColor = SpotifyGreen,
+                                indicatorColor    = SpotifyGreen.copy(alpha = 0.15f)
                             )
                         )
                     }
                 }
             } else {
-                // NowPlayingBar lub nic
                 bottomContent()
             }
         }
     ) { innerPadding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .padding(innerPadding)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
         ) {
-            AppNavGraph(
-                navController    = navController,
-                startDestination = startDestination
-            )
+            AppNavGraph(navController = navController, startDestination = startDestination)
         }
     }
 }
@@ -189,6 +184,3 @@ fun AppNavGraph(
         }
     }
 }
-
-// Rozszerzenie dla dp w NavigationBar (Scaffold slot)
-private val Int.dp get() = androidx.compose.ui.unit.Dp(this.toFloat())

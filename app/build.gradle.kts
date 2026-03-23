@@ -105,4 +105,6 @@ dependencies {
     // 2. Skopiuj spotify-app-remote-release-*.aar -> app/libs/
     // 3. Odkomentuj:
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+
+    testImplementation(kotlin("test"))
 }

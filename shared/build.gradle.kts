@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.ksp)
 }
 
 android {
@@ -17,7 +16,11 @@ android {
 
 dependencies {
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.room.runtime)
-    ksp(libs.room.compiler)
+    // Room usunięty z :shared – TrackFeaturesCache (@Entity) przeniesiony do :app/data/cache
+    // :shared nie zna żadnych bibliotek Androidowych specyficznych dla warstwy danych
     compileOnly("javax.inject:javax.inject:1")
+
+    // Testy jednostkowe – bez emulatora
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }

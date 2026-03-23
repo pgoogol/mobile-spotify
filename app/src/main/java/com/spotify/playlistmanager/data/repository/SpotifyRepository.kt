@@ -1,6 +1,7 @@
 package com.spotify.playlistmanager.data.repository
 
 import com.spotify.playlistmanager.data.api.SpotifyApiService
+import com.spotify.playlistmanager.data.cache.TrackFeaturesCache
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.model.*
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
@@ -18,6 +19,16 @@ import javax.inject.Singleton
  *   2. Jeśli brak → pobierz z Web API (batch po 100)
  *   3. Zapisz wynik do Room
  */
+/**
+ * Implementacja ISpotifyRepository.
+ *
+ * Zmiany względem poprzedniej wersji:
+ * - Usunięto filtrowanie playlist po ownerId — zwracane są wszystkie playlisty
+ *   użytkownika, w tym obserwowane (collaborative). Filtr po właścicielu
+ *   blokował dostęp do playlist współdzielonych.
+ * - Mapery używają TrackAudioFeatures (domenowy) zamiast TrackFeaturesCache (Room).
+ * - Usunięto LocalCsvImportHelper (funkcja CSV została usunięta z aplikacji).
+ */
 @Singleton
 class SpotifyRepository @Inject constructor(
     private val api: SpotifyApiService,
@@ -31,13 +42,16 @@ class SpotifyRepository @Inject constructor(
 
     /**
      * Pobiera WSZYSTKIE playlisty użytkownika (automatyczna paginacja).
-     * Zwraca tylko playlisty których właścicielem jest zalogowany user.
+     *
+     * Poprzednia wersja filtrowała po ownerId, co wykluczało playlisty
+     * obserwowane/collaborative. Obecna wersja zwraca wszystkie pozycje
+     * zwrócone przez endpoint /v1/me/playlists.
      */
     override suspend fun getUserPlaylists(): List<Playlist> = withContext(Dispatchers.IO) {
-        val userId = tokenManager.getUserId() ?: ""
         val all = mutableListOf<SpotifyPlaylist>()
         var offset = 0
         val limit = 50
+
 
         do {
             val page = api.getUserPlaylists(limit = limit, offset = offset)
@@ -45,9 +59,8 @@ class SpotifyRepository @Inject constructor(
             offset += limit
         } while (page.next != null)
 
-        all
-            .filter { it.owner.id == userId || userId.isEmpty() }
-            .map { it.toDomain() }
+
+        all.map { it.toDomain() }
     }
 
     // ════════════════════════════════════════════════════════
@@ -85,7 +98,9 @@ class SpotifyRepository @Inject constructor(
     override suspend fun createPlaylist(name: String, description: String): String =
         withContext(Dispatchers.IO) {
             val userId = tokenManager.getUserId()
-                ?: api.getCurrentUser().also { tokenManager.saveUserInfo(it.id, it.display_name) }.id
+                ?: api.getCurrentUser()
+                    .also { tokenManager.saveUserInfo(it.id, it.display_name) }
+                    .id
             val response = api.createPlaylist(
                 userId,
                 CreatePlaylistRequest(name = name, description = description, public = false)
@@ -114,12 +129,12 @@ class SpotifyRepository @Inject constructor(
     override suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
         val user = api.getCurrentUser()
         UserProfile(
-            id          = user.id,
+            id = user.id,
             displayName = user.display_name,
-            email       = user.email,
-            imageUrl    = user.images.firstOrNull()?.url,
-            country     = user.country,
-            followers   = user.followers?.total ?: 0
+            email = user.email,
+            imageUrl = user.images.firstOrNull()?.url,
+            country = user.country,
+            followers = user.followers?.total ?: 0
         )
     }
 
@@ -127,10 +142,10 @@ class SpotifyRepository @Inject constructor(
         runCatching {
             api.getTopArtists(limit = 20).items.map { artist ->
                 TopArtist(
-                    id         = artist.id,
-                    name       = artist.name,
-                    imageUrl   = artist.images.firstOrNull()?.url,
-                    genres     = artist.genres,
+                    id = artist.id,
+                    name = artist.name,
+                    imageUrl = artist.images.firstOrNull()?.url,
+                    genres = artist.genres,
                     popularity = artist.popularity
                 )
             }
@@ -175,6 +190,7 @@ class SpotifyRepository @Inject constructor(
 
         // 1. Sprawdź co jest w Room cache
         val idsAll = tracks.mapNotNull { it.id }
+
         val cached = dao.getFeaturesForIds(idsAll).associateBy { it.trackId }
 
         // 2. Pobierz brakujące z API
@@ -195,14 +211,16 @@ class SpotifyRepository @Inject constructor(
         }
     }
 
-    private suspend fun fetchAudioFeaturesFromApi(ids: List<String>): Map<String, TrackFeaturesCache> {
-        val result = mutableMapOf<String, TrackFeaturesCache>()
+    private suspend fun fetchAudioFeaturesFromApi(
+        ids: List<String>
+    ): Map<String, com.spotify.playlistmanager.data.model.TrackAudioFeatures> {
+        val result = mutableMapOf<String, com.spotify.playlistmanager.data.model.TrackAudioFeatures>()
         ids.chunked(100).forEach { chunk ->
             runCatching {
-                val response = api.getAudioFeatures(chunk.joinToString(","))
-                response.audio_features.filterNotNull().forEach { af ->
-                    result[af.id] = af.toCache()
-                }
+                api.getAudioFeatures(chunk.joinToString(","))
+                    .audio_features
+                    .filterNotNull()
+                    .forEach { af -> result[af.id] = af.toDomain() }
             }
         }
         return result
@@ -220,7 +238,9 @@ private fun SpotifyPlaylist.toDomain() = Playlist(
     ownerId = owner.id
 )
 
-private fun SpotifyTrack.toDomain(features: TrackFeaturesCache? = null) = Track(
+private fun SpotifyTrack.toDomain(
+    features: com.spotify.playlistmanager.data.model.TrackAudioFeatures? = null
+) = Track(
     id = id,
     title = name,
     artist = artists.joinToString(", ") { it.name },
@@ -235,14 +255,15 @@ private fun SpotifyTrack.toDomain(features: TrackFeaturesCache? = null) = Track(
     valence = features?.valence
 )
 
-private fun AudioFeatures.toCache() = TrackFeaturesCache(
-    trackId = id,
-    tempo = tempo,
-    energy = energy,
-    danceability = danceability,
-    valence = valence,
-    acousticness = acousticness,
-    instrumentalness = instrumentalness,
-    key = key,
-    mode = mode
-)
+private fun AudioFeatures.toDomain() =
+    com.spotify.playlistmanager.data.model.TrackAudioFeatures(
+        trackId = id,
+        tempo = tempo,
+        energy = energy,
+        danceability = danceability,
+        valence = valence,
+        acousticness = acousticness,
+        instrumentalness = instrumentalness,
+        key = key,
+        mode = mode
+    )

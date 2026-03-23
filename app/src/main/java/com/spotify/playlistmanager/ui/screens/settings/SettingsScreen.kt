@@ -1,8 +1,5 @@
 package com.spotify.playlistmanager.ui.screens.settings
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,15 +29,9 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    val csvLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris: List<Uri> ->
-        uris.forEach { viewModel.importCsv(it) }
-    }
-
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(state.importMessage) {
-        state.importMessage?.let {
+    LaunchedEffect(state.actionMessage) {
+        state.actionMessage?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearMessage()
         }
@@ -52,10 +43,7 @@ fun SettingsScreen(
                 title = { Text("Ustawienia", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Wstecz"
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Wstecz")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -98,21 +86,6 @@ fun SettingsScreen(
                     label = "Wpisy w cache",
                     value = "${state.cacheCount} utworów"
                 )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                SettingsActionRow(
-                    icon     = Icons.Default.FileOpen,
-                    label    = "Wczytaj cechy z CSV",
-                    sublabel = "Format: Song, Artist, Spotify Track Id, BPM, Dance, Energy",
-                    onClick  = { csvLauncher.launch("text/*") }
-                )
-                if (state.isImporting) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        color = SpotifyGreen
-                    )
-                }
                 if (state.cacheCount > 0) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                     SettingsActionRow(
@@ -129,7 +102,7 @@ fun SettingsScreen(
                 SettingsInfoRow(
                     icon  = Icons.Default.Info,
                     label = "Wersja",
-                    value = "0.2.0"
+                    value = "0.2.3"
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                 SettingsInfoRow(
@@ -158,9 +131,7 @@ private fun SettingsSection(
         )
         Card(
             shape  = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Column { content() }
         }
@@ -201,11 +172,10 @@ private fun SettingsInfoRow(
 
 @Composable
 private fun SettingsActionRow(
-    icon:     ImageVector,
-    label:    String,
-    sublabel: String? = null,
-    tint:     Color   = MaterialTheme.colorScheme.onSurface,
-    onClick:  () -> Unit
+    icon:    ImageVector,
+    label:   String,
+    tint:    Color   = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
 ) {
     Surface(
         onClick  = onClick,
@@ -223,20 +193,12 @@ private fun SettingsActionRow(
                 tint               = tint,
                 modifier           = Modifier.size(20.dp)
             )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text  = label,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = tint
-                )
-                sublabel?.let {
-                    Text(
-                        text  = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            Text(
+                text     = label,
+                modifier = Modifier.weight(1f),
+                style    = MaterialTheme.typography.bodyMedium,
+                color    = tint
+            )
             Icon(
                 imageVector        = Icons.Default.ChevronRight,
                 contentDescription = null,

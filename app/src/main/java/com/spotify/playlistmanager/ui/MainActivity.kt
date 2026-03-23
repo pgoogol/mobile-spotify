@@ -28,6 +28,15 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val isLoggedIn by mainViewModel.isLoggedIn.collectAsStateWithLifecycle()
 
+                // Obsługa 401 – wyloguj i przekieruj do LoginScreen
+                LaunchedEffect(Unit) {
+                    mainViewModel.authEventBus.unauthorized.collect {
+                        mainViewModel.forceLogout()
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
                 LaunchedEffect(isLoggedIn) {
                     if (isLoggedIn) mainViewModel.connectAppRemote()
                 }

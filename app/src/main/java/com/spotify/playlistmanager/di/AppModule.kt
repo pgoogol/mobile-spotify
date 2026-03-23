@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.google.gson.GsonBuilder
 import com.spotify.playlistmanager.BuildConfig
+import com.spotify.playlistmanager.data.api.AuthEventBus
 import com.spotify.playlistmanager.data.api.AuthInterceptor
 import com.spotify.playlistmanager.data.api.SpotifyApiService
 import com.spotify.playlistmanager.data.cache.AppDatabase
@@ -73,12 +74,17 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
         Room.databaseBuilder(ctx, AppDatabase::class.java, "spotify_playlist_manager.db")
+            // Wersja DB zmieniona z 1 na 2 po przeniesieniu TrackFeaturesCache do :app
             .fallbackToDestructiveMigration()
             .build()
 
     @Provides
     @Singleton
     fun provideTrackFeaturesDao(db: AppDatabase): TrackFeaturesDao = db.trackFeaturesDao()
+
+    // ── AuthEventBus ───────────────────────────────────────────────────────
+    // Singleton dostarczany przez Hilt – nie wymaga osobnego @Provides
+    // (Hilt sam tworzy @Singleton klasy z @Inject constructor)
 }
 
 @Module

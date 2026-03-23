@@ -1,8 +1,5 @@
 package com.spotify.playlistmanager.data.model
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
 // ════════════════════════════════════════════════════════════
 //  Spotify Web API – modele odpowiedzi JSON
 // ════════════════════════════════════════════════════════════
@@ -104,8 +101,6 @@ data class CreatePlaylistResponse(
 
 data class ExternalUrls(val spotify: String)
 
-// ── Top artyści – odpowiedź API ───────────────────────────────────────────────
-
 data class TopArtistsResponse(
     val items: List<SpotifyArtistFull>,
     val next:  String?,
@@ -124,7 +119,7 @@ data class SpotifyArtistFull(
 data class FollowersRef(val total: Int)
 
 // ════════════════════════════════════════════════════════════
-//  Modele domenowe UI
+//  Modele domenowe – bez zależności od Room / Android
 // ════════════════════════════════════════════════════════════
 
 data class Track(
@@ -136,7 +131,6 @@ data class Track(
     val durationMs: Int,
     val popularity: Int,
     val uri: String?,
-    // Audio features – pobierane z API lub lokalnego cache
     val tempo: Float? = null,
     val energy: Float? = null,
     val danceability: Float? = null,
@@ -178,8 +172,6 @@ data class PlaylistStats(
     }
 }
 
-// ── Profil użytkownika ────────────────────────────────────────────────────────
-
 data class UserProfile(
     val id:          String,
     val displayName: String?,
@@ -189,14 +181,33 @@ data class UserProfile(
     val followers:   Int
 )
 
-// ── Top artysta ───────────────────────────────────────────────────────────────
-
 data class TopArtist(
     val id:         String,
     val name:       String,
     val imageUrl:   String?,
     val genres:     List<String>,
     val popularity: Int
+)
+
+// ════════════════════════════════════════════════════════════
+//  Model domenowy cech audio – bez adnotacji Room
+//  (TrackFeaturesCache z adnotacją @Entity żyje w :app)
+// ════════════════════════════════════════════════════════════
+
+/**
+ * Domenowa reprezentacja cech audio – czyste Kotlin, zero Androida.
+ * Używana przez GeneratePlaylistUseCase i EnergyCurveCalculator.
+ */
+data class TrackAudioFeatures(
+    val trackId:          String,
+    val tempo:            Float?,
+    val energy:           Float?,
+    val danceability:     Float?,
+    val valence:          Float?,
+    val acousticness:     Float?,
+    val instrumentalness: Float?,
+    val key:              Int?,
+    val mode:             Int?
 )
 
 // ════════════════════════════════════════════════════════════
@@ -234,20 +245,3 @@ enum class EnergyCurve(val label: String, val emoji: String) {
     CUMBIA("Cumbia", "🎺"),
     CONSTANT("Stała", "─")
 }
-
-// ════════════════════════════════════════════════════════════
-//  Room – encja cache cech audio
-// ════════════════════════════════════════════════════════════
-
-@Entity(tableName = "track_features_cache")
-data class TrackFeaturesCache(
-    @PrimaryKey val trackId: String,
-    val tempo: Float?,
-    val energy: Float?,
-    val danceability: Float?,
-    val valence: Float?,
-    val acousticness: Float?,
-    val instrumentalness: Float?,
-    val key: Int?,
-    val mode: Int?
-)

@@ -4,7 +4,7 @@ import com.spotify.playlistmanager.data.model.*
 
 /**
  * Kontrakt dostępu do danych Spotify.
- * Implementacja (SpotifyRepository) mieszka w :data i zna Retrofit/Room.
+ * Implementacja (SpotifyRepository) mieszka w :app i zna Retrofit/Room.
  * ViewModele i use-case'y znają tylko ten interfejs – zero Androida w domain.
  */
 interface ISpotifyRepository {

@@ -2,20 +2,24 @@ package com.spotify.playlistmanager.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.spotify.playlistmanager.data.api.AuthEventBus
 import com.spotify.playlistmanager.util.SpotifyAppRemoteManager
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Główny ViewModel – zarządza App Remote i globalnym stanem nawigacji.
+ * Główny ViewModel – zarządza App Remote, globalnym stanem nawigacji
+ * i obsługą wygasłych tokenów (401 z AuthEventBus).
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
     val tokenManager:     TokenManager,
-    val appRemoteManager: SpotifyAppRemoteManager
+    val appRemoteManager: SpotifyAppRemoteManager,
+    val authEventBus:     AuthEventBus
 ) : ViewModel() {
 
     val isLoggedIn = tokenManager.isLoggedIn
@@ -26,9 +30,7 @@ class MainViewModel @Inject constructor(
 
     /** Podłącz App Remote gdy użytkownik jest zalogowany. */
     fun connectAppRemote() {
-        if (!appRemoteManager.isConnected) {
-            appRemoteManager.connect()
-        }
+        if (!appRemoteManager.isConnected) appRemoteManager.connect()
     }
 
     /** Odegraj URI przez App Remote (utwór lub playlista). */
@@ -36,9 +38,15 @@ class MainViewModel @Inject constructor(
         if (appRemoteManager.isConnected) {
             appRemoteManager.play(uri)
         } else {
-            appRemoteManager.connect {
-                appRemoteManager.play(uri)
-            }
+            appRemoteManager.connect { appRemoteManager.play(uri) }
+        }
+    }
+
+    /** Wylogowuje i czyści tokeny – wywoływane przy zdarzeniu 401. */
+    fun forceLogout() {
+        viewModelScope.launch {
+            appRemoteManager.disconnect()
+            tokenManager.clearTokens()
         }
     }
 

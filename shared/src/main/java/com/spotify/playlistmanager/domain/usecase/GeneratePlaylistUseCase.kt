@@ -9,9 +9,11 @@ import javax.inject.Singleton
 /**
  * Use-case generowania playlisty.
  *
- * Przeniesiony z PlaylistGeneratorEngine – teraz zależy od ISpotifyRepository
- * (interfejsu), nie od konkretnej implementacji Androida.
- * Dzięki temu jest testowalny bez emulatora i gotowy na KMP.
+ * Algorytm dla każdego segmentu (PlaylistSource):
+ *  1. Pobierz wszystkie utwory z playlisty źródłowej
+ *  2. Opcjonalnie posortuj wg SortOption
+ *  3. Weź pierwsze N utworów
+ *  4. Zastosuj krzywą energii (jeśli brak sortowania)
  */
 @Singleton
 class GeneratePlaylistUseCase @Inject constructor(
@@ -19,18 +21,27 @@ class GeneratePlaylistUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(sources: List<PlaylistSource>): List<Track> {
         val result = mutableListOf<Track>()
+
         for (source in sources) {
             val playlistId = source.playlist?.id ?: continue
+
             val allTracks = if (playlistId == LIKED_SONGS_ID) repository.getLikedTracks()
                             else repository.getPlaylistTracks(playlistId)
-            val sorted = if (source.sortBy != SortOption.NONE) applySorting(allTracks, source.sortBy)
-                         else allTracks
+
+            val sorted = if (source.sortBy != SortOption.NONE)
+                applySorting(allTracks, source.sortBy)
+            else allTracks
+
             val limited = sorted.take(source.trackCount)
-            val ordered = if (source.sortBy == SortOption.NONE && source.energyCurve != EnergyCurve.NONE)
+
+            val ordered = if (source.sortBy == SortOption.NONE
+                && source.energyCurve != EnergyCurve.NONE)
                 EnergyCurveCalculator.applyEnergyCurve(limited, source.energyCurve)
             else limited
+
             result.addAll(ordered)
         }
+
         return result
     }
 

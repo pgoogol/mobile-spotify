@@ -1,10 +1,8 @@
 package com.spotify.playlistmanager.ui.screens.settings
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesCache
-import com.spotify.playlistmanager.util.LocalCsvImportHelper
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -14,14 +12,12 @@ import javax.inject.Inject
 data class SettingsUiState(
     val displayName:   String? = null,
     val cacheCount:    Int     = 0,
-    val isImporting:   Boolean = false,
-    val importMessage: String? = null
+    val actionMessage: String? = null
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val tokenManager: TokenManager,
-    private val csvHelper:    LocalCsvImportHelper,
     private val cache:        ITrackFeaturesCache
 ) : ViewModel() {
 
@@ -37,27 +33,12 @@ class SettingsViewModel @Inject constructor(
         refreshCacheCount()
     }
 
-    fun importCsv(uri: Uri) {
-        viewModelScope.launch {
-            _state.update { it.copy(isImporting = true) }
-            val result = csvHelper.importFromUri(uri)
-            _state.update {
-                it.copy(
-                    isImporting   = false,
-                    cacheCount    = result.totalInCache,
-                    importMessage = if (result.errors.isEmpty())
-                        "✅ Dodano ${result.newEntries} nowych wpisów (łącznie: ${result.totalInCache})"
-                    else
-                        "⚠️ ${result.newEntries} nowych, ${result.errors.size} błędów"
-                )
-            }
-        }
-    }
-
     fun clearCache() {
         viewModelScope.launch {
             cache.clear()
-            _state.update { it.copy(cacheCount = 0, importMessage = "🗑️ Cache wyczyszczony") }
+            _state.update {
+                it.copy(cacheCount = 0, actionMessage = "🗑️ Cache wyczyszczony")
+            }
         }
     }
 
@@ -66,7 +47,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun clearMessage() {
-        _state.update { it.copy(importMessage = null) }
+        _state.update { it.copy(actionMessage = null) }
     }
 
     private fun refreshCacheCount() {
