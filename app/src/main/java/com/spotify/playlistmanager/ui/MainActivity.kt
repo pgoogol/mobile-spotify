@@ -28,24 +28,24 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val isLoggedIn by mainViewModel.isLoggedIn.collectAsStateWithLifecycle()
 
-                // Obsługa 401 – wyloguj i przekieruj do LoginScreen
+                // Obsługa wygasłego tokena (401) — ViewModel eksponuje sessionExpired
                 LaunchedEffect(Unit) {
-                    mainViewModel.authEventBus.unauthorized.collect {
+                    mainViewModel.sessionExpired.collect {
                         mainViewModel.forceLogout()
                         navController.navigate(Screen.Login.route) {
                             popUpTo(0) { inclusive = true }
                         }
                     }
                 }
+
                 LaunchedEffect(isLoggedIn) {
-                    if (isLoggedIn) mainViewModel.connectAppRemote()
+                    if (isLoggedIn) mainViewModel.onAppForeground()
                 }
 
-                // AppScaffold obsługuje BottomNavigationBar + NowPlayingBar
                 AppScaffold(
                     navController    = navController,
                     startDestination = if (isLoggedIn) Screen.Playlists.route
-                                       else Screen.Login.route
+                    else Screen.Login.route
                 )
             }
         }
@@ -58,15 +58,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onStop() {
-        super.onStop()
-        mainViewModel.appRemoteManager.disconnect()
-    }
-
     override fun onStart() {
         super.onStart()
-        if (mainViewModel.isLoggedIn.value) {
-            mainViewModel.connectAppRemote()
-        }
+        mainViewModel.onAppForeground()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        mainViewModel.onAppBackground()
     }
 }

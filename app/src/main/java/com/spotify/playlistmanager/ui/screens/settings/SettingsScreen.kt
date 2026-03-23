@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.spotify.playlistmanager.BuildConfig
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,7 +103,7 @@ fun SettingsScreen(
                 SettingsInfoRow(
                     icon  = Icons.Default.Info,
                     label = "Wersja",
-                    value = "0.2.3"
+                    value = BuildConfig.VERSION_NAME
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                 SettingsInfoRow(

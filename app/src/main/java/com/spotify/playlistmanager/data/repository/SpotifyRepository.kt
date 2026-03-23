@@ -1,7 +1,6 @@
 package com.spotify.playlistmanager.data.repository
 
 import com.spotify.playlistmanager.data.api.SpotifyApiService
-import com.spotify.playlistmanager.data.cache.TrackFeaturesCache
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.model.*
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository

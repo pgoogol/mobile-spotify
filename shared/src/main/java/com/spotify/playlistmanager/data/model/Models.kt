@@ -215,12 +215,23 @@ data class TrackAudioFeatures(
 // ════════════════════════════════════════════════════════════
 
 data class PlaylistSource(
-    val id: String = java.util.UUID.randomUUID().toString(),
+    // kotlin.random.Random zamiast java.util.UUID — KMP-safe, zero zależności JVM
+    val id: String = randomId(),
     val playlist: Playlist? = null,
     val trackCount: Int = 10,
     val sortBy: SortOption = SortOption.NONE,
     val energyCurve: EnergyCurve = EnergyCurve.NONE
 )
+
+/**
+ * Generuje prosty unikalny identyfikator bez java.util.UUID.
+ * Format: 16 losowych bajtów jako hex — wystarczający dla identyfikatorów
+ * sesji UI (nie musi być globalnie unikalny jak RFC-4122 UUID).
+ */
+private fun randomId(): String =
+    ByteArray(16)
+        .also { kotlin.random.Random.Default.nextBytes(it) }
+        .joinToString("") { "%02x".format(it) }
 
 enum class SortOption(val label: String) {
     NONE("Brak"),

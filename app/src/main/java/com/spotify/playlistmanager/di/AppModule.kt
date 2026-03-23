@@ -18,18 +18,41 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+/**
+ * Qualifier dla CoroutineScope powiązanego z życiem procesu aplikacji.
+ * Wstrzykiwany do TokenManager — zastępuje ręczny CoroutineScope(SupervisorJob()),
+ * który nie był anulowany (wyciek).
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ApplicationScope
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
     private const val SPOTIFY_BASE_URL = "https://api.spotify.com/"
+
+    // ── ApplicationScope ───────────────────────────────────────────────────
+    // Jeden współdzielony scope na cały proces aplikacji.
+    // SupervisorJob: błąd jednej korutyny nie anuluje pozostałych.
+
+    @Provides
+    @Singleton
+    @ApplicationScope
+    fun provideApplicationScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // ── Retrofit / OkHttp ──────────────────────────────────────────────────
 
@@ -40,10 +63,8 @@ object AppModule {
             .addInterceptor(authInterceptor)
             .addInterceptor(
                 HttpLoggingInterceptor().apply {
-                    level = if (BuildConfig.DEBUG)
-                        HttpLoggingInterceptor.Level.BODY
-                    else
-                        HttpLoggingInterceptor.Level.NONE
+                    level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+                    else HttpLoggingInterceptor.Level.NONE
                 }
             )
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -56,11 +77,7 @@ object AppModule {
         Retrofit.Builder()
             .baseUrl(SPOTIFY_BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(
-                GsonConverterFactory.create(
-                    GsonBuilder().setLenient().create()
-                )
-            )
+            .addConverterFactory(GsonConverterFactory.create(GsonBuilder().setLenient().create()))
             .build()
 
     @Provides
@@ -74,22 +91,21 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
         Room.databaseBuilder(ctx, AppDatabase::class.java, "spotify_playlist_manager.db")
-            // Wersja DB zmieniona z 1 na 2 po przeniesieniu TrackFeaturesCache do :app
+            // Room 2.7+ wymaga jawnego parametru dropAllTables — stary bezargumentowy
+            // wariant jest deprecated. Zachowanie identyczne: dane usuwane przy
+            // niezgodności schematu (akceptowalne bo cache jest odtwarzalny z API).
             .fallbackToDestructiveMigration()
             .build()
 
     @Provides
     @Singleton
     fun provideTrackFeaturesDao(db: AppDatabase): TrackFeaturesDao = db.trackFeaturesDao()
-
-    // ── AuthEventBus ───────────────────────────────────────────────────────
-    // Singleton dostarczany przez Hilt – nie wymaga osobnego @Provides
-    // (Hilt sam tworzy @Singleton klasy z @Inject constructor)
 }
 
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class AppBindings {
+
     @Binds
     @Singleton
     abstract fun bindSpotifyRepository(impl: SpotifyRepository): ISpotifyRepository
