@@ -1,22 +1,16 @@
 package com.spotify.playlistmanager.di
 
-import android.content.Context
-import androidx.room.Room
 import com.google.gson.GsonBuilder
+import com.google.gson.Strictness
 import com.spotify.playlistmanager.BuildConfig
-import com.spotify.playlistmanager.data.api.AuthEventBus
 import com.spotify.playlistmanager.data.api.AuthInterceptor
 import com.spotify.playlistmanager.data.api.SpotifyApiService
-import com.spotify.playlistmanager.data.cache.AppDatabase
-import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.repository.SpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
-import com.spotify.playlistmanager.domain.repository.ITrackFeaturesCache
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,7 +71,11 @@ object AppModule {
         Retrofit.Builder()
             .baseUrl(SPOTIFY_BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create(GsonBuilder().setLenient().create()))
+            .addConverterFactory(
+                GsonConverterFactory.create(
+                    GsonBuilder().setStrictness(Strictness.LENIENT).create()
+                )
+            )
             .build()
 
     @Provides
@@ -85,21 +83,6 @@ object AppModule {
     fun provideSpotifyApiService(retrofit: Retrofit): SpotifyApiService =
         retrofit.create(SpotifyApiService::class.java)
 
-    // ── Room ───────────────────────────────────────────────────────────────
-
-    @Provides
-    @Singleton
-    fun provideDatabase(@ApplicationContext ctx: Context): AppDatabase =
-        Room.databaseBuilder(ctx, AppDatabase::class.java, "spotify_playlist_manager.db")
-            // Room 2.7+ wymaga jawnego parametru dropAllTables — stary bezargumentowy
-            // wariant jest deprecated. Zachowanie identyczne: dane usuwane przy
-            // niezgodności schematu (akceptowalne bo cache jest odtwarzalny z API).
-            .fallbackToDestructiveMigration()
-            .build()
-
-    @Provides
-    @Singleton
-    fun provideTrackFeaturesDao(db: AppDatabase): TrackFeaturesDao = db.trackFeaturesDao()
 }
 
 @Module
@@ -109,8 +92,4 @@ abstract class AppBindings {
     @Binds
     @Singleton
     abstract fun bindSpotifyRepository(impl: SpotifyRepository): ISpotifyRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindTrackFeaturesCache(impl: TrackFeaturesDao): ITrackFeaturesCache
 }

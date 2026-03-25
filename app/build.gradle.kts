@@ -15,7 +15,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.2.4"
+        versionName = "0.3.0"
 
         // ⚠️  Uzupełnij własne dane z developer.spotify.com/dashboard
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"3298169ef5a64bf39b6c1466e304c790\"")
@@ -85,11 +85,6 @@ dependencies {
 
     // Coil – ładowanie obrazów (okładki albumów)
     implementation(libs.coil.compose)
-
-    // Room – lokalna baza danych (cache cech audio)
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
 
     // DataStore – przechowywanie tokenu
     implementation(libs.datastore)

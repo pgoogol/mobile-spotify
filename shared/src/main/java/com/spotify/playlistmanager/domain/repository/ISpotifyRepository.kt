@@ -17,5 +17,4 @@ interface ISpotifyRepository {
     suspend fun getUserProfile(): UserProfile
     suspend fun getTopArtists(): List<TopArtist>
     suspend fun getLikedTracksCount(): Int
-    suspend fun getCachedFeaturesCount(): Int
 }

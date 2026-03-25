@@ -80,24 +80,6 @@ fun SettingsScreen(
                 )
             }
 
-            // ── Cache cech audio ─────────────────────────────────────────
-            SettingsSection(title = "Cache cech audio") {
-                SettingsInfoRow(
-                    icon  = Icons.Default.Storage,
-                    label = "Wpisy w cache",
-                    value = "${state.cacheCount} utworów"
-                )
-                if (state.cacheCount > 0) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-                    SettingsActionRow(
-                        icon    = Icons.Default.DeleteSweep,
-                        label   = "Wyczyść cache",
-                        tint    = MaterialTheme.colorScheme.error,
-                        onClick = viewModel::clearCache
-                    )
-                }
-            }
-
             // ── O aplikacji ──────────────────────────────────────────────
             SettingsSection(title = "O aplikacji") {
                 SettingsInfoRow(

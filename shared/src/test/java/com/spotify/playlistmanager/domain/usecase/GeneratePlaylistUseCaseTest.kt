@@ -30,7 +30,6 @@ class GeneratePlaylistUseCaseTest {
         override suspend fun getUserProfile() = throw UnsupportedOperationException()
         override suspend fun getTopArtists() = emptyList<TopArtist>()
         override suspend fun getLikedTracksCount() = likedTracks.size
-        override suspend fun getCachedFeaturesCount() = 0
     }
 
     private fun makeTrack(

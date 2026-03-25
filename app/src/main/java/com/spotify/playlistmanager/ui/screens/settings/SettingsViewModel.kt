@@ -2,7 +2,6 @@ package com.spotify.playlistmanager.ui.screens.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.spotify.playlistmanager.domain.repository.ITrackFeaturesCache
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -17,8 +16,7 @@ data class SettingsUiState(
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val tokenManager: TokenManager,
-    private val cache:        ITrackFeaturesCache
+    private val tokenManager: TokenManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -30,16 +28,6 @@ class SettingsViewModel @Inject constructor(
                 _state.update { it.copy(displayName = name) }
             }
         }
-        refreshCacheCount()
-    }
-
-    fun clearCache() {
-        viewModelScope.launch {
-            cache.clear()
-            _state.update {
-                it.copy(cacheCount = 0, actionMessage = "🗑️ Cache wyczyszczony")
-            }
-        }
     }
 
     fun logout() {
@@ -48,11 +36,5 @@ class SettingsViewModel @Inject constructor(
 
     fun clearMessage() {
         _state.update { it.copy(actionMessage = null) }
-    }
-
-    private fun refreshCacheCount() {
-        viewModelScope.launch {
-            _state.update { it.copy(cacheCount = cache.count()) }
-        }
     }
 }

@@ -1,7 +1,6 @@
 package com.spotify.playlistmanager.data.repository
 
 import com.spotify.playlistmanager.data.api.SpotifyApiService
-import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.model.*
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.util.TokenManager
@@ -31,7 +30,6 @@ import javax.inject.Singleton
 @Singleton
 class SpotifyRepository @Inject constructor(
     private val api: SpotifyApiService,
-    private val dao: TrackFeaturesDao,
     private val tokenManager: TokenManager
 ) : ISpotifyRepository {
 
@@ -158,14 +156,6 @@ class SpotifyRepository @Inject constructor(
     }
 
     // ════════════════════════════════════════════════════════
-    //  Cache cech audio
-    // ════════════════════════════════════════════════════════
-
-    override suspend fun getCachedFeaturesCount(): Int = withContext(Dispatchers.IO) {
-        dao.count()
-    }
-
-    // ════════════════════════════════════════════════════════
     //  Prywatne pomocnicze
     // ════════════════════════════════════════════════════════
 
@@ -187,33 +177,16 @@ class SpotifyRepository @Inject constructor(
     private suspend fun enrichWithFeatures(items: List<PlaylistTrackItem>): List<Track> {
         val tracks = items.mapNotNull { it.track }.filter { it.id != null }
 
-        // 1. Sprawdź co jest w Room cache
-        val idsAll = tracks.mapNotNull { it.id }
-
-        val cached = dao.getFeaturesForIds(idsAll).associateBy { it.trackId }
-
-        // 2. Pobierz brakujące z API
-        val missing = idsAll.filter { it !in cached }
-        val fromApi = if (missing.isNotEmpty()) {
-            fetchAudioFeaturesFromApi(missing)
-        } else emptyMap()
-
-        // 3. Zapisz nowe do Room
-        if (fromApi.isNotEmpty()) {
-            dao.upsertAll(fromApi.values.toList())
-        }
-
-        // 4. Złóż wynik
+        val ids = tracks.mapNotNull { it.id }
+        val features = if (ids.isNotEmpty()) fetchAudioFeaturesFromApi(ids) else emptyMap()
         return tracks.map { track ->
-            val features = cached[track.id] ?: fromApi[track.id]
-            track.toDomain(features)
+
+            track.toDomain(features[track.id])
         }
     }
 
-    private suspend fun fetchAudioFeaturesFromApi(
-        ids: List<String>
-    ): Map<String, com.spotify.playlistmanager.data.model.TrackAudioFeatures> {
-        val result = mutableMapOf<String, com.spotify.playlistmanager.data.model.TrackAudioFeatures>()
+    private suspend fun fetchAudioFeaturesFromApi(ids: List<String>): Map<String, TrackAudioFeatures> {
+        val result = mutableMapOf<String, TrackAudioFeatures>()
         ids.chunked(100).forEach { chunk ->
             runCatching {
                 api.getAudioFeatures(chunk.joinToString(","))
@@ -238,7 +211,7 @@ private fun SpotifyPlaylist.toDomain() = Playlist(
 )
 
 private fun SpotifyTrack.toDomain(
-    features: com.spotify.playlistmanager.data.model.TrackAudioFeatures? = null
+    features: TrackAudioFeatures? = null
 ) = Track(
     id = id,
     title = name,
@@ -255,7 +228,7 @@ private fun SpotifyTrack.toDomain(
 )
 
 private fun AudioFeatures.toDomain() =
-    com.spotify.playlistmanager.data.model.TrackAudioFeatures(
+    TrackAudioFeatures(
         trackId = id,
         tempo = tempo,
         energy = energy,
