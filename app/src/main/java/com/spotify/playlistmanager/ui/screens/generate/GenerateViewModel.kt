@@ -12,20 +12,20 @@ import javax.inject.Inject
 
 // ── Stan ekranu generowania ──────────────────────────────────────────────────
 data class GenerateUiState(
-    val availablePlaylists: List<Playlist> = emptyList(),
+    val availablePlaylists: List<Playlist>  = emptyList(),
     val sources:            List<PlaylistSource> = listOf(PlaylistSource()),
-    val newPlaylistName:    String = "Nowa Playlista",
-    val previewTracks:      List<Track>? = null,
-    val isLoadingPlaylists: Boolean = true,
-    val isGenerating:       Boolean = false,
-    val isSaving:           Boolean = false,
-    val savedPlaylistUrl:   String? = null,
-    val error:              String? = null
+    val newPlaylistName:    String          = "Nowa Playlista",
+    val previewTracks:      List<Track>?    = null,
+    val isLoadingPlaylists: Boolean         = true,
+    val isGenerating:       Boolean         = false,
+    val isSaving:           Boolean         = false,
+    val savedPlaylistUrl:   String?         = null,
+    val error:              String?         = null
 )
 
 @HiltViewModel
 class GenerateViewModel @Inject constructor(
-    private val repository: ISpotifyRepository,
+    private val repository:       ISpotifyRepository,
     private val generatePlaylist: GeneratePlaylistUseCase
 ) : ViewModel() {
 
@@ -42,12 +42,12 @@ class GenerateViewModel @Inject constructor(
                 .onSuccess { playlists ->
                     // Dodaj wirtualną "Polubione" na początku
                     val likedPlaylist = Playlist(
-                        id = GeneratePlaylistUseCase.LIKED_SONGS_ID,
-                        name = "❤ Polubione utwory",
+                        id         = GeneratePlaylistUseCase.LIKED_SONGS_ID,
+                        name       = "❤ Polubione utwory",
                         description = null,
-                        imageUrl = null,
+                        imageUrl   = null,
                         trackCount = 0,
-                        ownerId = ""
+                        ownerId    = ""
                     )
                     _state.update {
                         it.copy(
@@ -144,5 +144,6 @@ class GenerateViewModel @Inject constructor(
     fun clearSavedState() {
         _state.update { it.copy(savedPlaylistUrl = null, previewTracks = null) }
     }
+
     fun clearError() { _state.update { it.copy(error = null) } }
 }

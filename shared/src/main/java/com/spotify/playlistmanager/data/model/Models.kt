@@ -58,24 +58,6 @@ data class SpotifyAlbum(
     val release_date: String?
 )
 
-data class AudioFeatures(
-    val id: String,
-    val energy: Float,
-    val danceability: Float,
-    val tempo: Float,
-    val valence: Float,
-    val acousticness: Float,
-    val instrumentalness: Float,
-    val loudness: Float,
-    val speechiness: Float,
-    val liveness: Float,
-    val mode: Int,
-    val key: Int,
-    val time_signature: Int
-)
-
-data class AudioFeaturesResponse(val audio_features: List<AudioFeatures?>)
-
 data class SpotifyUser(
     val id:           String,
     val display_name: String?,
@@ -130,11 +112,7 @@ data class Track(
     val albumArtUrl: String?,
     val durationMs: Int,
     val popularity: Int,
-    val uri: String?,
-    val tempo: Float? = null,
-    val energy: Float? = null,
-    val danceability: Float? = null,
-    val valence: Float? = null
+    val uri: String?
 ) {
     fun formattedDuration(): String {
         val totalSeconds = durationMs / 1000
@@ -155,12 +133,7 @@ data class Playlist(
 
 data class PlaylistStats(
     val trackCount: Int,
-    val totalDurationMs: Long,
-    val avgBpm: Float?,
-    val minBpm: Float?,
-    val maxBpm: Float?,
-    val avgEnergy: Float?,
-    val avgDanceability: Float?
+    val totalDurationMs: Long
 ) {
     fun formattedDuration(): String {
         val totalSeconds = totalDurationMs / 1000
@@ -190,27 +163,6 @@ data class TopArtist(
 )
 
 // ════════════════════════════════════════════════════════════
-//  Model domenowy cech audio – bez adnotacji Room
-//  (TrackFeaturesCache z adnotacją @Entity żyje w :app)
-// ════════════════════════════════════════════════════════════
-
-/**
- * Domenowa reprezentacja cech audio – czyste Kotlin, zero Androida.
- * Używana przez GeneratePlaylistUseCase i EnergyCurveCalculator.
- */
-data class TrackAudioFeatures(
-    val trackId:          String,
-    val tempo:            Float?,
-    val energy:           Float?,
-    val danceability:     Float?,
-    val valence:          Float?,
-    val acousticness:     Float?,
-    val instrumentalness: Float?,
-    val key:              Int?,
-    val mode:             Int?
-)
-
-// ════════════════════════════════════════════════════════════
 //  Modele generatora playlist
 // ════════════════════════════════════════════════════════════
 
@@ -219,8 +171,7 @@ data class PlaylistSource(
     val id: String = randomId(),
     val playlist: Playlist? = null,
     val trackCount: Int = 10,
-    val sortBy: SortOption = SortOption.NONE,
-    val energyCurve: EnergyCurve = EnergyCurve.NONE
+    val sortBy: SortOption = SortOption.NONE
 )
 
 /**
@@ -237,22 +188,5 @@ enum class SortOption(val label: String) {
     NONE("Brak"),
     POPULARITY("Popularność"),
     DURATION("Długość"),
-    ENERGY("Energia"),
-    DANCEABILITY("Taneczność"),
-    TEMPO("Tempo (BPM)"),
     RELEASE_DATE("Data wydania")
-}
-
-enum class EnergyCurve(val label: String, val emoji: String) {
-    NONE("Brak", ""),
-    RISING("Wzrastająca", "↗"),
-    FALLING("Opadająca", "↘"),
-    WAVE("Fala", "∿"),
-    RANDOM("Losowa", "🎲"),
-    SALSA("Salsa", "💃"),
-    BACHATA("Bachata", "🌹"),
-    REGGAETON("Reggaeton", "🔥"),
-    MERENGUE("Merengue", "⚡"),
-    CUMBIA("Cumbia", "🎺"),
-    CONSTANT("Stała", "─")
 }

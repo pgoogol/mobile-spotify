@@ -2,31 +2,78 @@
 package com.spotify.playlistmanager.ui.screens.generate
 
 import android.content.Intent
-import android.net.Uri
-import androidx.compose.animation.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.spotify.playlistmanager.data.model.*
-import com.spotify.playlistmanager.ui.components.EnergyCurveChart
+import com.spotify.playlistmanager.data.model.Playlist
+import com.spotify.playlistmanager.data.model.PlaylistSource
+import com.spotify.playlistmanager.data.model.SortOption
+import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
-import com.spotify.playlistmanager.ui.theme.SpotifyMidGray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,7 +95,7 @@ fun GenerateScreen(
 
     // Sukces – otwórz Spotify
     LaunchedEffect(state.savedPlaylistUrl) {
-        state.savedPlaylistUrl?.let { url ->
+        state.savedPlaylistUrl?.let {
             snackbarHostState.showSnackbar("✅ Playlista zapisana w Spotify!")
         }
     }
@@ -70,14 +117,14 @@ fun GenerateScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             GenerateBottomBar(
-                hasPreview  = state.previewTracks != null,
-                isGenerating = state.isGenerating,
-                isSaving    = state.isSaving,
-                onGenerate  = viewModel::generatePreview,
-                onSave      = viewModel::saveToSpotify,
+                hasPreview    = state.previewTracks != null,
+                isGenerating  = state.isGenerating,
+                isSaving      = state.isSaving,
+                onGenerate    = viewModel::generatePreview,
+                onSave        = viewModel::saveToSpotify,
                 onOpenSpotify = {
                     state.savedPlaylistUrl?.let { url ->
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
                     }
                 },
                 hasSavedUrl = state.savedPlaylistUrl != null
@@ -85,11 +132,10 @@ fun GenerateScreen(
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier
+            modifier       = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             // ── Nazwa nowej playlisty ────────────────────────────────────
             item {
@@ -150,26 +196,12 @@ fun GenerateScreen(
                     )
                 }
 
-                // Wykres energii
-                item {
-                    val dominantCurve = state.sources
-                        .firstOrNull { it.energyCurve != EnergyCurve.NONE }
-                        ?.energyCurve ?: EnergyCurve.CONSTANT
-                    EnergyCurveChart(
-                        tracks   = tracks,
-                        curve    = dominantCurve,
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .fillMaxWidth()
-                    )
-                }
-
                 itemsIndexed(tracks, key = { i, t -> "${i}_${t.id}" }) { index, track ->
                     PreviewTrackRow(
-                        track    = track,
-                        index    = index + 1,
-                        onRemove = { viewModel.removeTrackFromPreview(index) },
-                        onMoveUp = { if (index > 0) viewModel.moveTrack(index, index - 1) },
+                        track      = track,
+                        index      = index + 1,
+                        onRemove   = { viewModel.removeTrackFromPreview(index) },
+                        onMoveUp   = { if (index > 0) viewModel.moveTrack(index, index - 1) },
                         onMoveDown = {
                             if (index < tracks.lastIndex) viewModel.moveTrack(index, index + 1)
                         }
@@ -192,7 +224,7 @@ private fun PlaylistNameField(
         value         = name,
         onValueChange = onChange,
         label         = { Text("Nazwa nowej playlisty") },
-        leadingIcon   = { Icon(Icons.Default.PlaylistAdd, null) },
+        leadingIcon   = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
         modifier      = modifier.fillMaxWidth(),
         singleLine    = true,
         shape         = RoundedCornerShape(12.dp),
@@ -212,9 +244,8 @@ private fun PlaylistSourceCard(
     canRemove:          Boolean,
     modifier:           Modifier = Modifier
 ) {
-    var playlistExpanded    by remember { mutableStateOf(false) }
-    var sortExpanded        by remember { mutableStateOf(false) }
-    var energyCurveExpanded by remember { mutableStateOf(false) }
+    var playlistExpanded by remember { mutableStateOf(false) }
+    var sortExpanded     by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -222,33 +253,32 @@ private fun PlaylistSourceCard(
         colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier            = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // ── Wiersz 1: Wybór playlisty + usuń ────────────────────────
             Row(
-                verticalAlignment    = Alignment.CenterVertically,
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Dropdown playlisty
                 ExposedDropdownMenuBox(
-                    expanded        = playlistExpanded,
+                    expanded         = playlistExpanded,
                     onExpandedChange = { playlistExpanded = it },
-                    modifier        = Modifier.weight(1f)
+                    modifier         = Modifier.weight(1f)
                 ) {
                     OutlinedTextField(
-                        value            = source.playlist?.name ?: "Wybierz playlistę…",
-                        onValueChange    = {},
-                        readOnly         = true,
-                        trailingIcon     = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = playlistExpanded) },
-                        modifier         = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                        singleLine       = true,
-                        shape            = RoundedCornerShape(8.dp),
-                        colors           = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen),
-                        textStyle        = MaterialTheme.typography.bodyMedium
+                        value         = source.playlist?.name ?: "Wybierz playlistę…",
+                        onValueChange = {},
+                        readOnly      = true,
+                        trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = playlistExpanded) },
+                        modifier      = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                        singleLine    = true,
+                        shape         = RoundedCornerShape(8.dp),
+                        colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen),
+                        textStyle     = MaterialTheme.typography.bodyMedium
                     )
                     ExposedDropdownMenu(
-                        expanded        = playlistExpanded,
+                        expanded         = playlistExpanded,
                         onDismissRequest = { playlistExpanded = false }
                     ) {
                         availablePlaylists.forEach { pl ->
@@ -263,7 +293,6 @@ private fun PlaylistSourceCard(
                     }
                 }
 
-                // Przycisk usuń
                 if (canRemove) {
                     IconButton(onClick = onRemove) {
                         Icon(
@@ -275,24 +304,22 @@ private fun PlaylistSourceCard(
                 }
             }
 
-            // ── Wiersz 2: Liczba + sortowanie + krzywa energii ───────────
+            // ── Wiersz 2: Liczba + sortowanie ────────────────────────────
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 
-                // Liczba utworów
                 OutlinedTextField(
                     value         = source.trackCount.toString(),
                     onValueChange = { v ->
                         v.toIntOrNull()?.coerceIn(1, 200)
                             ?.let { onUpdate(source.copy(trackCount = it)) }
                     },
-                    label         = { Text("Liczba") },
-                    modifier      = Modifier.width(80.dp),
-                    singleLine    = true,
-                    shape         = RoundedCornerShape(8.dp),
-                    colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
+                    label      = { Text("Liczba") },
+                    modifier   = Modifier.width(80.dp),
+                    singleLine = true,
+                    shape      = RoundedCornerShape(8.dp),
+                    colors     = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
                 )
 
-                // Sortowanie
                 ExposedDropdownMenuBox(
                     expanded         = sortExpanded,
                     onExpandedChange = { sortExpanded = it },
@@ -317,49 +344,8 @@ private fun PlaylistSourceCard(
                             DropdownMenuItem(
                                 text    = { Text(opt.label) },
                                 onClick = {
-                                    onUpdate(source.copy(
-                                        sortBy = opt,
-                                        // Jeśli wybrano sortowanie, wyłącz krzywą energii
-                                        energyCurve = if (opt != SortOption.NONE) EnergyCurve.NONE
-                                                      else source.energyCurve
-                                    ))
+                                    onUpdate(source.copy(sortBy = opt))
                                     sortExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Krzywa energii (wyłączona gdy jest sortowanie)
-                ExposedDropdownMenuBox(
-                    expanded         = energyCurveExpanded && source.sortBy == SortOption.NONE,
-                    onExpandedChange = {
-                        if (source.sortBy == SortOption.NONE) energyCurveExpanded = it
-                    },
-                    modifier         = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value         = source.energyCurve.let { "${it.emoji} ${it.label}".trim() },
-                        onValueChange = {},
-                        readOnly      = true,
-                        label         = { Text("Energia") },
-                        trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = energyCurveExpanded) },
-                        modifier      = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                        singleLine    = true,
-                        enabled       = source.sortBy == SortOption.NONE,
-                        shape         = RoundedCornerShape(8.dp),
-                        colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
-                    )
-                    ExposedDropdownMenu(
-                        expanded         = energyCurveExpanded,
-                        onDismissRequest = { energyCurveExpanded = false }
-                    ) {
-                        EnergyCurve.entries.forEach { curve ->
-                            DropdownMenuItem(
-                                text    = { Text("${curve.emoji} ${curve.label}".trim()) },
-                                onClick = {
-                                    onUpdate(source.copy(energyCurve = curve))
-                                    energyCurveExpanded = false
                                 }
                             )
                         }
@@ -384,69 +370,53 @@ private fun PreviewTrackRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Numer porządkowy
         Text(
             "$index",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(24.dp)
         )
 
-        // Tekst
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 track.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                style    = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 "${track.artist} · ${track.formattedDuration()}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style    = MaterialTheme.typography.bodySmall,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
 
-        // Audio feature badge
-        track.energy?.let {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = SpotifyGreen.copy(alpha = 0.2f)
-            ) {
-                Text(
-                    "E%.2f".format(it),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SpotifyGreen,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-            }
-        }
-
-        // Przyciski kolejności
         Column {
             IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.KeyboardArrowUp, "W górę", modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.KeyboardArrowUp, "W górę",
+                    modifier = Modifier.size(18.dp),
+                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.KeyboardArrowDown, "W dół", modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.KeyboardArrowDown, "W dół",
+                    modifier = Modifier.size(18.dp),
+                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
-        // Usuń
         IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.Close, "Usuń", modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.error)
+            Icon(Icons.Default.Close, "Usuń",
+                modifier = Modifier.size(16.dp),
+                tint     = MaterialTheme.colorScheme.error)
         }
     }
     HorizontalDivider(
-        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
         modifier = Modifier.padding(start = 48.dp, end = 16.dp)
     )
 }
@@ -455,26 +425,25 @@ private fun PreviewTrackRow(
 
 @Composable
 private fun GenerateBottomBar(
-    hasPreview:   Boolean,
-    isGenerating: Boolean,
-    isSaving:     Boolean,
-    onGenerate:   () -> Unit,
-    onSave:       () -> Unit,
-    onOpenSpotify:() -> Unit,
-    hasSavedUrl:  Boolean
+    hasPreview:    Boolean,
+    isGenerating:  Boolean,
+    isSaving:      Boolean,
+    onGenerate:    () -> Unit,
+    onSave:        () -> Unit,
+    onOpenSpotify: () -> Unit,
+    hasSavedUrl:   Boolean
 ) {
     Surface(
         tonalElevation = 8.dp,
-        color = MaterialTheme.colorScheme.surface
+        color          = MaterialTheme.colorScheme.surface
     ) {
         Row(
-            modifier = Modifier
+            modifier              = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
                 .navigationBarsPadding(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Generuj
             Button(
                 onClick  = onGenerate,
                 enabled  = !isGenerating && !isSaving,
@@ -483,8 +452,8 @@ private fun GenerateBottomBar(
             ) {
                 if (isGenerating) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color    = MaterialTheme.colorScheme.onPrimary,
+                        modifier    = Modifier.size(18.dp),
+                        color       = MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 2.dp
                     )
                 } else {
@@ -494,7 +463,6 @@ private fun GenerateBottomBar(
                 }
             }
 
-            // Zapisz (aktywny po podglądzie)
             AnimatedVisibility(hasPreview && !hasSavedUrl) {
                 Button(
                     onClick  = onSave,
@@ -503,8 +471,8 @@ private fun GenerateBottomBar(
                 ) {
                     if (isSaving) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color    = MaterialTheme.colorScheme.onPrimary,
+                            modifier    = Modifier.size(18.dp),
+                            color       = MaterialTheme.colorScheme.onPrimary,
                             strokeWidth = 2.dp
                         )
                     } else {
@@ -515,14 +483,13 @@ private fun GenerateBottomBar(
                 }
             }
 
-            // Otwórz w Spotify
             AnimatedVisibility(hasSavedUrl) {
                 OutlinedButton(
                     onClick  = onOpenSpotify,
                     modifier = Modifier.weight(1f),
                     colors   = ButtonDefaults.outlinedButtonColors(contentColor = SpotifyGreen)
                 ) {
-                    Icon(Icons.Default.OpenInNew, null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Otwórz Spotify")
                 }
@@ -545,8 +512,8 @@ private fun SectionHeader(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text  = title,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+            text     = title,
+            style    = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             modifier = Modifier.weight(1f)
         )
         action()

@@ -1,7 +1,6 @@
 package com.spotify.playlistmanager.ui.screens.tracks
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -49,9 +48,9 @@ fun TracksScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text     = playlistName,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        text       = playlistName,
+                        maxLines   = 1,
+                        overflow   = TextOverflow.Ellipsis,
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -79,7 +78,7 @@ fun TracksScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment     = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedTextField(
@@ -119,8 +118,8 @@ fun TracksScreen(
             when {
                 state.isLoading -> {
                     Box(
-                        modifier          = Modifier.fillMaxSize(),
-                        contentAlignment  = Alignment.Center
+                        modifier         = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(color = SpotifyGreen)
                     }
@@ -170,30 +169,13 @@ private fun StatsBar(stats: PlaylistStats) {
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        LazyRow(
-            modifier              = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+        Row(
+            modifier              = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(32.dp),
+            verticalAlignment     = Alignment.CenterVertically
         ) {
-            item { StatChip(emoji = "🎵", value = "${stats.trackCount}", label = "utworów") }
-            item { StatChip(emoji = "⏱", value = stats.formattedDuration(), label = "czas") }
-            stats.avgBpm?.let { bpm ->
-                item {
-                    StatChip(
-                        emoji = "🥁",
-                        value = "%.0f".format(bpm),
-                        label = "śr. BPM",
-                        sub   = stats.minBpm?.let { mn ->
-                            stats.maxBpm?.let { mx -> "${mn.toInt()}–${mx.toInt()}" }
-                        }
-                    )
-                }
-            }
-            stats.avgEnergy?.let { e ->
-                item { StatChip(emoji = "⚡", value = "%.2f".format(e), label = "energia") }
-            }
-            stats.avgDanceability?.let { d ->
-                item { StatChip(emoji = "💃", value = "%.2f".format(d), label = "taneczność") }
-            }
+            StatChip(emoji = "🎵", value = "${stats.trackCount}", label = "utworów")
+            StatChip(emoji = "⏱", value = stats.formattedDuration(), label = "czas")
         }
     }
 }
@@ -202,8 +184,7 @@ private fun StatsBar(stats: PlaylistStats) {
 private fun StatChip(
     emoji: String,
     value: String,
-    label: String,
-    sub:   String? = null
+    label: String
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(text = emoji, fontSize = 18.sp)
@@ -217,13 +198,6 @@ private fun StatChip(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        sub?.let {
-            Text(
-                text  = it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
     }
 }
 
@@ -268,18 +242,18 @@ private fun TrackRow(track: Track) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment     = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Okładka albumu
         if (track.albumArtUrl != null) {
             AsyncImage(
-                model            = track.albumArtUrl,
+                model              = track.albumArtUrl,
                 contentDescription = track.album,
-                modifier         = Modifier
+                modifier           = Modifier
                     .size(52.dp)
                     .clip(RoundedCornerShape(6.dp)),
-                contentScale     = ContentScale.Crop
+                contentScale       = ContentScale.Crop
             )
         } else {
             Box(
@@ -315,33 +289,11 @@ private fun TrackRow(track: Track) {
             )
         }
 
-        // Czas + audio features
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text  = track.formattedDuration(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                track.tempo?.let       { FeatureBadge(value = "%.0f".format(it), label = "bpm") }
-                track.energy?.let      { FeatureBadge(value = "%.2f".format(it), label = "E") }
-                track.danceability?.let{ FeatureBadge(value = "%.2f".format(it), label = "D") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FeatureBadge(value: String, label: String) {
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
-    ) {
+        // Czas trwania
         Text(
-            text     = "$value $label",
-            style    = MaterialTheme.typography.labelSmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            text  = track.formattedDuration(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

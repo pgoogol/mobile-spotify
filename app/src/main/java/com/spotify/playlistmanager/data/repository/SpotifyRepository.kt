@@ -48,15 +48,11 @@ class SpotifyRepository @Inject constructor(
         val all = mutableListOf<SpotifyPlaylist>()
         var offset = 0
         val limit = 50
-
-
         do {
             val page = api.getUserPlaylists(limit = limit, offset = offset)
             all.addAll(page.items)
             offset += limit
         } while (page.next != null)
-
-
         all.map { it.toDomain() }
     }
 
@@ -70,8 +66,7 @@ class SpotifyRepository @Inject constructor(
      */
     override suspend fun getPlaylistTracks(playlistId: String): List<Track> =
         withContext(Dispatchers.IO) {
-            val items = fetchAllPlaylistItems(playlistId)
-            enrichWithFeatures(items)
+            fetchAllPlaylistItems(playlistId).mapNotNull { it.track?.toDomain() }
         }
 
     /**
@@ -85,7 +80,7 @@ class SpotifyRepository @Inject constructor(
             items.addAll(page.items)
             offset += 50
         } while (page.next != null)
-        enrichWithFeatures(items)
+        items.mapNotNull { it.track?.toDomain() }
     }
 
     // ════════════════════════════════════════════════════════
@@ -98,11 +93,10 @@ class SpotifyRepository @Inject constructor(
                 ?: api.getCurrentUser()
                     .also { tokenManager.saveUserInfo(it.id, it.display_name) }
                     .id
-            val response = api.createPlaylist(
+            api.createPlaylist(
                 userId,
                 CreatePlaylistRequest(name = name, description = description, public = false)
-            )
-            response.id
+            ).id
         }
 
     override suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>) =
@@ -126,12 +120,12 @@ class SpotifyRepository @Inject constructor(
     override suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
         val user = api.getCurrentUser()
         UserProfile(
-            id = user.id,
+            id          = user.id,
             displayName = user.display_name,
-            email = user.email,
-            imageUrl = user.images.firstOrNull()?.url,
-            country = user.country,
-            followers = user.followers?.total ?: 0
+            email       = user.email,
+            imageUrl    = user.images.firstOrNull()?.url,
+            country     = user.country,
+            followers   = user.followers?.total ?: 0
         )
     }
 
@@ -139,10 +133,10 @@ class SpotifyRepository @Inject constructor(
         runCatching {
             api.getTopArtists(limit = 20).items.map { artist ->
                 TopArtist(
-                    id = artist.id,
-                    name = artist.name,
-                    imageUrl = artist.images.firstOrNull()?.url,
-                    genres = artist.genres,
+                    id         = artist.id,
+                    name       = artist.name,
+                    imageUrl   = artist.images.firstOrNull()?.url,
+                    genres     = artist.genres,
                     popularity = artist.popularity
                 )
             }
@@ -170,72 +164,26 @@ class SpotifyRepository @Inject constructor(
         return items
     }
 
-    /**
-     * Wzbogaca listę elementów playlisty o audio features.
-     * Najpierw sprawdza Room, potem odpytuje API w batchach po 100.
-     */
-    private suspend fun enrichWithFeatures(items: List<PlaylistTrackItem>): List<Track> {
-        val tracks = items.mapNotNull { it.track }.filter { it.id != null }
-
-        val ids = tracks.mapNotNull { it.id }
-        val features = if (ids.isNotEmpty()) fetchAudioFeaturesFromApi(ids) else emptyMap()
-        return tracks.map { track ->
-
-            track.toDomain(features[track.id])
-        }
-    }
-
-    private suspend fun fetchAudioFeaturesFromApi(ids: List<String>): Map<String, TrackAudioFeatures> {
-        val result = mutableMapOf<String, TrackAudioFeatures>()
-        ids.chunked(100).forEach { chunk ->
-            runCatching {
-                api.getAudioFeatures(chunk.joinToString(","))
-                    .audio_features
-                    .filterNotNull()
-                    .forEach { af -> result[af.id] = af.toDomain() }
-            }
-        }
-        return result
-    }
 }
 
 // ── Mapery modeli ────────────────────────────────────────────────────────────
 
 private fun SpotifyPlaylist.toDomain() = Playlist(
-    id = id,
-    name = name,
+    id         = id,
+    name       = name,
     description = description,
-    imageUrl = images.firstOrNull()?.url,
+    imageUrl   = images.firstOrNull()?.url,
     trackCount = tracks.total,
-    ownerId = owner.id
+    ownerId    = owner.id
 )
 
-private fun SpotifyTrack.toDomain(
-    features: TrackAudioFeatures? = null
-) = Track(
-    id = id,
-    title = name,
-    artist = artists.joinToString(", ") { it.name },
-    album = album.name,
+private fun SpotifyTrack.toDomain() = Track(
+    id          = id,
+    title       = name,
+    artist      = artists.joinToString(", ") { it.name },
+    album       = album.name,
     albumArtUrl = album.images.firstOrNull()?.url,
-    durationMs = duration_ms,
-    popularity = popularity,
-    uri = uri,
-    tempo = features?.tempo,
-    energy = features?.energy,
-    danceability = features?.danceability,
-    valence = features?.valence
+    durationMs  = duration_ms,
+    popularity  = popularity,
+    uri         = uri
 )
-
-private fun AudioFeatures.toDomain() =
-    TrackAudioFeatures(
-        trackId = id,
-        tempo = tempo,
-        energy = energy,
-        danceability = danceability,
-        valence = valence,
-        acousticness = acousticness,
-        instrumentalness = instrumentalness,
-        key = key,
-        mode = mode
-    )

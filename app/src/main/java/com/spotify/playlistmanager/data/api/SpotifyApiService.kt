@@ -34,13 +34,6 @@ interface SpotifyApiService {
         @Query("offset") offset: Int = 0
     ): PlaylistTracksResponse
 
-    // ── Audio features (max 100 ids jednocześnie) ──────────────────────────
-
-    @GET("v1/audio-features")
-    suspend fun getAudioFeatures(
-        @Query("ids") ids: String         // comma-separated track IDs
-    ): AudioFeaturesResponse
-
     // ── Użytkownik ─────────────────────────────────────────────────────────
 
     @GET("v1/me")
