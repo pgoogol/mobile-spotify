@@ -24,33 +24,41 @@ import com.spotify.playlistmanager.ui.screens.profile.ProfileScreen
 import com.spotify.playlistmanager.ui.screens.settings.SettingsScreen
 import com.spotify.playlistmanager.ui.screens.tracks.TracksScreen
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
+import com.spotify.playlistmanager.ui.screens.csv.CsvImportScreen
 
 // ── Definicje ekranów ────────────────────────────────────────────────────────
 
 sealed class Screen(val route: String) {
-    data object Login     : Screen("login")
+    data object Login : Screen("login")
     data object Playlists : Screen("playlists")
-    data object Tracks    : Screen("tracks/{playlistId}/{playlistName}") {
+    data object Tracks : Screen("tracks/{playlistId}/{playlistName}") {
         fun createRoute(id: String, name: String) =
-            "tracks/${java.net.URLEncoder.encode(id, "UTF-8")}/${java.net.URLEncoder.encode(name, "UTF-8")}"
+            "tracks/${java.net.URLEncoder.encode(id, "UTF-8")}/${
+                java.net.URLEncoder.encode(
+                    name,
+                    "UTF-8"
+                )
+            }"
     }
+
     data object Generate : Screen("generate")
     data object Settings : Screen("settings")
-    data object Profile  : Screen("profile")
+    data object Profile : Screen("profile")
+    data object CsvImport : Screen("csv_import")
 }
 
 // ── Zakładki dolnej nawigacji ────────────────────────────────────────────────
 
 private data class BottomNavItem(
     val screen: Screen,
-    val label:  String,
-    val icon:   androidx.compose.ui.graphics.vector.ImageVector
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
 )
 
 private val bottomNavItems = listOf(
     BottomNavItem(Screen.Playlists, "Playlisty", Icons.Default.LibraryMusic),
-    BottomNavItem(Screen.Generate,  "Generuj",   Icons.Default.AutoAwesome),
-    BottomNavItem(Screen.Profile,   "Profil",    Icons.Default.Person)
+    BottomNavItem(Screen.Generate, "Generuj", Icons.Default.AutoAwesome),
+    BottomNavItem(Screen.Profile, "Profil", Icons.Default.Person)
 )
 
 private val bottomBarRoutes = setOf(
@@ -63,13 +71,13 @@ private val bottomBarRoutes = setOf(
 
 @Composable
 fun AppScaffold(
-    navController:    NavHostController,
+    navController: NavHostController,
     startDestination: String,
-    bottomContent:    @Composable () -> Unit = {}
+    bottomContent: @Composable () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute      = navBackStackEntry?.destination?.route
-    val showBottomBar     = currentRoute in bottomBarRoutes
+    val currentRoute = navBackStackEntry?.destination?.route
+    val showBottomBar = currentRoute in bottomBarRoutes
 
     Scaffold(
         bottomBar = {
@@ -83,19 +91,19 @@ fun AppScaffold(
                         val selected = currentRoute == item.screen.route
                         NavigationBarItem(
                             selected = selected,
-                            onClick  = {
+                            onClick = {
                                 if (!selected) {
                                     navController.navigate(item.screen.route) {
                                         popUpTo(Screen.Playlists.route) { saveState = true }
                                         launchSingleTop = true
-                                        restoreState    = true
+                                        restoreState = true
                                     }
                                 }
                             },
-                            icon  = { Icon(item.icon, contentDescription = item.label) },
+                            icon = { Icon(item.icon, contentDescription = item.label) },
                             label = {
                                 Text(
-                                    text  = item.label,
+                                    text = item.label,
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = if (selected) FontWeight.Bold
                                         else FontWeight.Normal
@@ -105,7 +113,7 @@ fun AppScaffold(
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = SpotifyGreen,
                                 selectedTextColor = SpotifyGreen,
-                                indicatorColor    = SpotifyGreen.copy(alpha = 0.15f)
+                                indicatorColor = SpotifyGreen.copy(alpha = 0.15f)
                             )
                         )
                     }
@@ -129,7 +137,7 @@ fun AppScaffold(
 
 @Composable
 fun AppNavGraph(
-    navController:    NavHostController,
+    navController: NavHostController,
     startDestination: String
 ) {
     NavHost(navController = navController, startDestination = startDestination) {
@@ -153,14 +161,14 @@ fun AppNavGraph(
         }
 
         composable(Screen.Tracks.route) { back ->
-            val id   = back.arguments?.getString("playlistId")
+            val id = back.arguments?.getString("playlistId")
                 ?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: return@composable
             val name = back.arguments?.getString("playlistName")
                 ?.let { java.net.URLDecoder.decode(it, "UTF-8") } ?: ""
             TracksScreen(
-                playlistId   = id,
+                playlistId = id,
                 playlistName = name,
-                onBack       = { navController.popBackStack() }
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -170,7 +178,8 @@ fun AppNavGraph(
 
         composable(Screen.Settings.route) {
             SettingsScreen(
-                onBack   = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+                onCsvImport = { navController.navigate(Screen.CsvImport.route) },
                 onLogout = {
                     navController.navigate(Screen.Login.route) {
                         popUpTo(0) { inclusive = true }
@@ -181,6 +190,9 @@ fun AppNavGraph(
 
         composable(Screen.Profile.route) {
             ProfileScreen()
+        }
+        composable(Screen.CsvImport.route) {
+            CsvImportScreen(onBack = { navController.popBackStack() })
         }
     }
 }

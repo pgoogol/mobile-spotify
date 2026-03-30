@@ -16,6 +16,7 @@ android {
 
 dependencies {
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.room.runtime)
     // Room usunięty z :shared – TrackFeaturesCache (@Entity) przeniesiony do :app/data/cache
     // :shared nie zna żadnych bibliotek Androidowych specyficznych dla warstwy danych
     compileOnly("javax.inject:javax.inject:1")

@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -56,7 +58,7 @@ fun PlaylistsScreen(
                     IconButton(onClick = viewModel::toggleViewMode) {
                         Icon(
                             imageVector = if (viewMode == ViewMode.LIST)
-                                Icons.Default.GridView else Icons.Default.ViewList,
+                                Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
                             contentDescription = "Zmień widok"
                         )
                     }
@@ -350,7 +352,7 @@ private fun PlaylistGridItem(playlist: Playlist, onClick: () -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    Icons.Default.QueueMusic, null,
+                    Icons.AutoMirrored.Filled.QueueMusic, null,
                     tint     = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(40.dp)
                 )
@@ -417,7 +419,7 @@ private fun PlaylistThumbnail(
                 .background(SpotifyMidGray),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.QueueMusic, null,
+            Icon(Icons.AutoMirrored.Filled.QueueMusic, null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

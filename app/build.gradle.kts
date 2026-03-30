@@ -15,7 +15,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.3.0"
+        versionName = "0.4.0"
 
         // ⚠️  Uzupełnij własne dane z developer.spotify.com/dashboard
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"3298169ef5a64bf39b6c1466e304c790\"")
@@ -100,6 +100,11 @@ dependencies {
     // 2. Skopiuj spotify-app-remote-release-*.aar -> app/libs/
     // 3. Odkomentuj:
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+
+    // Room – lokalny cache cech audio
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
     testImplementation(kotlin("test"))
 }
