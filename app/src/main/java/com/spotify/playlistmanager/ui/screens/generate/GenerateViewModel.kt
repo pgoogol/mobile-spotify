@@ -14,22 +14,22 @@ import javax.inject.Inject
 
 // ── Stan ekranu generowania ──────────────────────────────────────────────────
 data class GenerateUiState(
-    val availablePlaylists: List<Playlist>  = emptyList(),
-    val sources:            List<PlaylistSource> = listOf(PlaylistSource()),
-    val newPlaylistName:    String          = "Nowa Playlista",
-    val previewTracks:      List<Track>?    = null,
-    val generateResult:     GenerateResult? = null,
-    val smoothJoin:         Boolean         = true,
-    val isLoadingPlaylists: Boolean         = true,
-    val isGenerating:       Boolean         = false,
-    val isSaving:           Boolean         = false,
-    val savedPlaylistUrl:   String?         = null,
-    val error:              String?         = null
+    val availablePlaylists: List<Playlist> = emptyList(),
+    val sources: List<PlaylistSource> = listOf(PlaylistSource()),
+    val newPlaylistName: String = "Nowa Playlista",
+    val previewTracks: List<Track>? = null,
+    val generateResult: GenerateResult? = null,
+    val smoothJoin: Boolean = true,
+    val isLoadingPlaylists: Boolean = true,
+    val isGenerating: Boolean = false,
+    val isSaving: Boolean = false,
+    val savedPlaylistUrl: String? = null,
+    val error: String? = null
 )
 
 @HiltViewModel
 class GenerateViewModel @Inject constructor(
-    private val repository:       ISpotifyRepository,
+    private val repository: ISpotifyRepository,
     private val generatePlaylist: GeneratePlaylistUseCase,
     private val templateRepository: IGeneratorTemplateRepository
 ) : ViewModel() {
@@ -47,7 +47,9 @@ class GenerateViewModel @Inject constructor(
         templateRepository.observeCount()
             .stateIn(viewModelScope, SharingStarted.Lazily, 0)
 
-    init { loadAvailablePlaylists() }
+    init {
+        loadAvailablePlaylists()
+    }
 
     // ── Ładowanie playlist ───────────────────────────────────────────────────
     fun loadAvailablePlaylists() {
@@ -114,7 +116,7 @@ class GenerateViewModel @Inject constructor(
             val curve = src.energyCurve
             if (curve is EnergyCurve.Wave && src.trackCount < curve.tracksPerHalfWave) {
                 _state.update {
-                    it.copy(error = "Zbyt mało utworów dla fali w „${src.playlist?.name}": " +
+                    it.copy(error = "Zbyt mało utworów dla fali w ${src.playlist?.name}: " +
                             "min. ${curve.tracksPerHalfWave}, ustawiono ${src.trackCount}")
                 }
                 return
@@ -124,7 +126,14 @@ class GenerateViewModel @Inject constructor(
         val hasCurves = sources.any { it.energyCurve !is EnergyCurve.None }
 
         viewModelScope.launch {
-            _state.update { it.copy(isGenerating = true, error = null, previewTracks = null, generateResult = null) }
+            _state.update {
+                it.copy(
+                    isGenerating = true,
+                    error = null,
+                    previewTracks = null,
+                    generateResult = null
+                )
+            }
 
             if (hasCurves) {
                 runCatching {
@@ -194,10 +203,18 @@ class GenerateViewModel @Inject constructor(
     }
 
     fun clearSavedState() {
-        _state.update { it.copy(savedPlaylistUrl = null, previewTracks = null, generateResult = null) }
+        _state.update {
+            it.copy(
+                savedPlaylistUrl = null,
+                previewTracks = null,
+                generateResult = null
+            )
+        }
     }
 
-    fun clearError() { _state.update { it.copy(error = null) } }
+    fun clearError() {
+        _state.update { it.copy(error = null) }
+    }
 
     // ── Szablony ─────────────────────────────────────────────────────────────
 
@@ -209,13 +226,14 @@ class GenerateViewModel @Inject constructor(
         }
         viewModelScope.launch {
             runCatching {
-                templateRepository.save(GeneratorTemplate(
+                templateRepository.save(
+                    GeneratorTemplate(
                     name = name,
                     sources = sources.mapIndexed { idx, src ->
                         TemplateSource(
                             position = idx,
                             playlistId = src.playlist!!.id,
-                            playlistName = src.playlist.name,
+                            playlistName = src.playlist!!.name,
                             trackCount = src.trackCount,
                             sortBy = src.sortBy,
                             energyCurve = src.energyCurve

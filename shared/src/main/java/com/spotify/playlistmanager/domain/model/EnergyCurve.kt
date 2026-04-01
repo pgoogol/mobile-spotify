@@ -195,7 +195,7 @@ sealed class EnergyCurve {
 
     companion object {
         /** Wszystkie predefiniowane krzywe do wyświetlenia w dropdown. */
-        val presets: List<EnergyCurve> = listOf(
+        val presets: List<EnergyCurve> get() = listOf(
             None,
             SalsaRomantica,
             SalsaClasica,

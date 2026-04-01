@@ -86,7 +86,13 @@ fun PlaylistSourceCard(
                     ) {
                         availablePlaylists.forEach { pl ->
                             DropdownMenuItem(
-                                text = { Text(pl.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                text = {
+                                    Text(
+                                        pl.name,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 onClick = {
                                     onUpdate(source.copy(playlist = pl))
                                     playlistExpanded = false
@@ -297,7 +303,13 @@ private fun WaveConfiguration(
             )
 
             IconButton(
-                onClick = { if (wave.tracksPerHalfWave < 10) onWaveChange(wave.copy(tracksPerHalfWave = wave.tracksPerHalfWave + 1)) },
+                onClick = {
+                    if (wave.tracksPerHalfWave < 10) onWaveChange(
+                        wave.copy(
+                            tracksPerHalfWave = wave.tracksPerHalfWave + 1
+                        )
+                    )
+                },
                 modifier = Modifier.size(28.dp)
             ) {
                 Icon(Icons.Default.KeyboardArrowUp, "Więcej", modifier = Modifier.size(18.dp))

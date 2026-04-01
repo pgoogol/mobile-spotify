@@ -110,7 +110,7 @@ fun TemplatesScreen(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("Usuń szablon") },
-            text = { Text("Czy na pewno chcesz usunąć „${template.name}"?") },
+            text = { Text("Czy na pewno chcesz usunąć '${template.name}'?") },
             confirmButton = {
                 TextButton(
                     onClick = {

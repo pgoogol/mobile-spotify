@@ -2,7 +2,6 @@
 agp = "8.12.3"
 kotlin = "2.0.21"
 coreKtx = "1.13.1"
-kotlinxSerializationJson = "2.0.21"
 lifecycleRuntimeKtx = "2.8.6"
 activityCompose = "1.9.3"
 composeBom = "2024.10.01"
@@ -16,7 +15,7 @@ gson = "2.11.0"
 coil = "2.7.0"
 datastore = "1.1.1"
 coroutines = "1.9.0"
-serialization = "2.0.21"
+serialization = "1.7.3"
 spotifyAuth = "3.1.0"
 room = "2.6.1"
 roomCommonJvm = "2.8.4"
@@ -37,7 +36,6 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
 hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
-kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
 retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = "retrofit" }
 retrofit-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
@@ -47,7 +45,7 @@ gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 datastore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
-kotlinx-serialization = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 spotify-auth = { group = "com.spotify.android", name = "auth", version.ref = "spotifyAuth" }
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx     = { group = "androidx.room", name = "room-ktx",     version.ref = "room" }

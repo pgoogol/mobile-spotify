@@ -345,6 +345,148 @@ private fun PlaylistNameField(
     )
 }
 
+// ── Wiersz podglądu ──────────────────────────────────────────────────────────
+
+@Composable
+private fun PreviewTrackRow(
+    track:      Track,
+    index:      Int,
+    onRemove:   () -> Unit,
+    onMoveUp:   () -> Unit,
+    onMoveDown: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            "$index",
+            style    = MaterialTheme.typography.bodySmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(24.dp)
+        )
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                track.title,
+                style    = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "${track.artist} · ${track.formattedDuration()}",
+                style    = MaterialTheme.typography.bodySmall,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Column {
+            IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.KeyboardArrowUp, "W górę",
+                    modifier = Modifier.size(18.dp),
+                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.KeyboardArrowDown, "W dół",
+                    modifier = Modifier.size(18.dp),
+                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Close, "Usuń",
+                modifier = Modifier.size(16.dp),
+                tint     = MaterialTheme.colorScheme.error)
+        }
+    }
+    HorizontalDivider(
+        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+        modifier = Modifier.padding(start = 48.dp, end = 16.dp)
+    )
+}
+
+// ── Bottom bar ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun GenerateBottomBar(
+    hasPreview:    Boolean,
+    isGenerating:  Boolean,
+    isSaving:      Boolean,
+    onGenerate:    () -> Unit,
+    onSave:        () -> Unit,
+    onOpenSpotify: () -> Unit,
+    hasSavedUrl:   Boolean
+) {
+    Surface(
+        tonalElevation = 8.dp,
+        color          = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .navigationBarsPadding(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick  = onGenerate,
+                enabled  = !isGenerating && !isSaving,
+                modifier = Modifier.weight(1f),
+                colors   = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier    = Modifier.size(18.dp),
+                        color       = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Generuj")
+                }
+            }
+
+            AnimatedVisibility(hasPreview && !hasSavedUrl) {
+                Button(
+                    onClick  = onSave,
+                    enabled  = !isGenerating && !isSaving,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier    = Modifier.size(18.dp),
+                            color       = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Zapisz")
+                    }
+                }
+            }
+
+            AnimatedVisibility(hasSavedUrl) {
+                OutlinedButton(
+                    onClick  = onOpenSpotify,
+                    modifier = Modifier.weight(1f),
+                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = SpotifyGreen)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Otwórz Spotify")
+                }
+            }
+        }
+    }
+}
+
 // ── Sekcja nagłówka ──────────────────────────────────────────────────────────
 
 @Composable
