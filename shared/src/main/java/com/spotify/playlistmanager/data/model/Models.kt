@@ -1,5 +1,7 @@
 package com.spotify.playlistmanager.data.model
 
+import com.spotify.playlistmanager.domain.model.EnergyCurve
+
 // ════════════════════════════════════════════════════════════
 //  Spotify Web API – modele odpowiedzi JSON
 // ════════════════════════════════════════════════════════════
@@ -171,7 +173,8 @@ data class PlaylistSource(
     val id: String = randomId(),
     val playlist: Playlist? = null,
     val trackCount: Int = 10,
-    val sortBy: SortOption = SortOption.NONE
+    val sortBy: SortOption = SortOption.NONE,
+    val energyCurve: EnergyCurve = EnergyCurve.None
 )
 
 /**
