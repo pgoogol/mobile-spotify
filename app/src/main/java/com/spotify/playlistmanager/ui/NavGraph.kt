@@ -13,18 +13,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.spotify.playlistmanager.ui.screens.csv.CsvImportScreen
 import com.spotify.playlistmanager.ui.screens.generate.GenerateScreen
+import com.spotify.playlistmanager.ui.screens.generate.GenerateViewModel
 import com.spotify.playlistmanager.ui.screens.login.LoginScreen
 import com.spotify.playlistmanager.ui.screens.playlists.PlaylistsScreen
 import com.spotify.playlistmanager.ui.screens.profile.ProfileScreen
 import com.spotify.playlistmanager.ui.screens.settings.SettingsScreen
+import com.spotify.playlistmanager.ui.screens.templates.TemplatesScreen
 import com.spotify.playlistmanager.ui.screens.tracks.TracksScreen
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
-import com.spotify.playlistmanager.ui.screens.csv.CsvImportScreen
 
 // ── Definicje ekranów ────────────────────────────────────────────────────────
 
@@ -42,6 +46,7 @@ sealed class Screen(val route: String) {
     }
 
     data object Generate : Screen("generate")
+    data object Templates : Screen("templates")
     data object Settings : Screen("settings")
     data object Profile : Screen("profile")
     data object CsvImport : Screen("csv_import")
@@ -173,7 +178,37 @@ fun AppNavGraph(
         }
 
         composable(Screen.Generate.route) {
-            GenerateScreen(onBack = { navController.popBackStack() })
+            // GenerateViewModel współdzielony z TemplatesScreen przez back-stack
+            val parentEntry = remember(it) {
+                navController.getBackStackEntry(Screen.Generate.route)
+            }
+            val viewModel: GenerateViewModel = hiltViewModel(parentEntry)
+
+            GenerateScreen(
+                onBack = { navController.popBackStack() },
+                onTemplates = { navController.navigate(Screen.Templates.route) },
+                viewModel = viewModel
+            )
+        }
+
+        composable(Screen.Templates.route) {
+            // Współdzielony ViewModel z GenerateScreen
+            val parentEntry = remember(it) {
+                navController.getBackStackEntry(Screen.Generate.route)
+            }
+            val viewModel: GenerateViewModel = hiltViewModel(parentEntry)
+            val templates by viewModel.templates.collectAsStateWithLifecycle()
+
+            TemplatesScreen(
+                templates = templates,
+                onLoadTemplate = { template ->
+                    viewModel.loadTemplate(template)
+                    navController.popBackStack()
+                },
+                onRenameTemplate = viewModel::renameTemplate,
+                onDeleteTemplate = viewModel::deleteTemplate,
+                onBack = { navController.popBackStack() }
+            )
         }
 
         composable(Screen.Settings.route) {

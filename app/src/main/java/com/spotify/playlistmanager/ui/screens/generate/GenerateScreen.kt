@@ -27,22 +27,20 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -50,6 +48,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -69,20 +69,23 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.spotify.playlistmanager.data.model.Playlist
-import com.spotify.playlistmanager.data.model.PlaylistSource
-import com.spotify.playlistmanager.data.model.SortOption
 import com.spotify.playlistmanager.data.model.Track
+import com.spotify.playlistmanager.domain.model.EnergyCurve
+import com.spotify.playlistmanager.ui.components.EnergyCurveChart
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GenerateScreen(
-    onBack:    () -> Unit,
-    viewModel: GenerateViewModel = hiltViewModel()
+    onBack:        () -> Unit,
+    onTemplates:   () -> Unit,
+    viewModel:     GenerateViewModel = hiltViewModel()
 ) {
-    val state   by viewModel.state.collectAsStateWithLifecycle()
+    val state         by viewModel.state.collectAsStateWithLifecycle()
+    val templateCount by viewModel.templateCount.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    var showSaveTemplateDialog by remember { mutableStateOf(false) }
 
     // Obsługa błędów jako Snackbar
     val snackbarHostState = remember { SnackbarHostState() }
@@ -100,6 +103,9 @@ fun GenerateScreen(
         }
     }
 
+    // Czy jakiekolwiek źródło ma krzywą energii
+    val hasCurves = state.sources.any { it.energyCurve !is EnergyCurve.None }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -107,6 +113,24 @@ fun GenerateScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Wstecz")
+                    }
+                },
+                actions = {
+                    // Zapisz jako szablon
+                    IconButton(onClick = { showSaveTemplateDialog = true }) {
+                        Icon(Icons.Default.Save, "Zapisz szablon")
+                    }
+                    // Szablony z badge
+                    IconButton(onClick = onTemplates) {
+                        BadgedBox(
+                            badge = {
+                                if (templateCount > 0) {
+                                    Badge { Text("$templateCount") }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Description, "Szablony")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -146,6 +170,31 @@ fun GenerateScreen(
                 )
             }
 
+            // ── Smooth Join switch (widoczny gdy są krzywe) ──────────────
+            if (hasCurves) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Smooth Join", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+                            Text("Wygładza przejścia między segmentami",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = state.smoothJoin,
+                            onCheckedChange = viewModel::onSmoothJoinChange,
+                            colors = SwitchDefaults.colors(checkedTrackColor = SpotifyGreen)
+                        )
+                    }
+                }
+            }
+
             // ── Sekcja źródeł ────────────────────────────────────────────
             item {
                 SectionHeader(
@@ -182,6 +231,24 @@ fun GenerateScreen(
                 }
             }
 
+            // ── Wykres krzywej energii (po wygenerowaniu) ────────────────
+            state.generateResult?.let { result ->
+                if (result.segments.any { it.targetScores.isNotEmpty() }) {
+                    item { Spacer(Modifier.height(8.dp)) }
+                    item {
+                        SectionHeader(title = "Krzywa energii")
+                    }
+                    item {
+                        EnergyCurveChart(
+                            segments = result.segments,
+                            overallMatchPercentage = result.overallMatchPercentage,
+                            isDryRun = false,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                    }
+                }
+            }
+
             // ── Podgląd wygenerowanej playlisty ─────────────────────────
             state.previewTracks?.let { tracks ->
                 item { Spacer(Modifier.height(8.dp)) }
@@ -210,6 +277,52 @@ fun GenerateScreen(
             }
         }
     }
+
+    // Dialog zapisz szablon
+    if (showSaveTemplateDialog) {
+        SaveTemplateDialog(
+            onConfirm = { name ->
+                viewModel.saveAsTemplate(name)
+                showSaveTemplateDialog = false
+            },
+            onDismiss = { showSaveTemplateDialog = false }
+        )
+    }
+}
+
+// ── Dialog zapisu szablonu ────────────────────────────────────────────────────
+
+@Composable
+private fun SaveTemplateDialog(
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zapisz szablon") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Nazwa szablonu") },
+                placeholder = { Text("np. Salsa Night Set") },
+                singleLine = true,
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim()) },
+                enabled = name.isNotBlank()
+            ) { Text("Zapisz") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Anuluj") }
+        }
+    )
 }
 
 // ── Pole nazwy playlisty ─────────────────────────────────────────────────────
@@ -230,272 +343,6 @@ private fun PlaylistNameField(
         shape         = RoundedCornerShape(12.dp),
         colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
     )
-}
-
-// ── Karta źródła ─────────────────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PlaylistSourceCard(
-    source:             PlaylistSource,
-    availablePlaylists: List<Playlist>,
-    onUpdate:           (PlaylistSource) -> Unit,
-    onRemove:           () -> Unit,
-    canRemove:          Boolean,
-    modifier:           Modifier = Modifier
-) {
-    var playlistExpanded by remember { mutableStateOf(false) }
-    var sortExpanded     by remember { mutableStateOf(false) }
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape    = RoundedCornerShape(12.dp),
-        colors   = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(
-            modifier            = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // ── Wiersz 1: Wybór playlisty + usuń ────────────────────────
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ExposedDropdownMenuBox(
-                    expanded         = playlistExpanded,
-                    onExpandedChange = { playlistExpanded = it },
-                    modifier         = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value         = source.playlist?.name ?: "Wybierz playlistę…",
-                        onValueChange = {},
-                        readOnly      = true,
-                        trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = playlistExpanded) },
-                        modifier      = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(8.dp),
-                        colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen),
-                        textStyle     = MaterialTheme.typography.bodyMedium
-                    )
-                    ExposedDropdownMenu(
-                        expanded         = playlistExpanded,
-                        onDismissRequest = { playlistExpanded = false }
-                    ) {
-                        availablePlaylists.forEach { pl ->
-                            DropdownMenuItem(
-                                text    = { Text(pl.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                onClick = {
-                                    onUpdate(source.copy(playlist = pl))
-                                    playlistExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (canRemove) {
-                    IconButton(onClick = onRemove) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Usuń",
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
-
-            // ── Wiersz 2: Liczba + sortowanie ────────────────────────────
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-
-                OutlinedTextField(
-                    value         = source.trackCount.toString(),
-                    onValueChange = { v ->
-                        v.toIntOrNull()?.coerceIn(1, 200)
-                            ?.let { onUpdate(source.copy(trackCount = it)) }
-                    },
-                    label      = { Text("Liczba") },
-                    modifier   = Modifier.width(80.dp),
-                    singleLine = true,
-                    shape      = RoundedCornerShape(8.dp),
-                    colors     = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
-                )
-
-                ExposedDropdownMenuBox(
-                    expanded         = sortExpanded,
-                    onExpandedChange = { sortExpanded = it },
-                    modifier         = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value         = source.sortBy.label,
-                        onValueChange = {},
-                        readOnly      = true,
-                        label         = { Text("Sortuj") },
-                        trailingIcon  = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sortExpanded) },
-                        modifier      = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
-                        singleLine    = true,
-                        shape         = RoundedCornerShape(8.dp),
-                        colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
-                    )
-                    ExposedDropdownMenu(
-                        expanded         = sortExpanded,
-                        onDismissRequest = { sortExpanded = false }
-                    ) {
-                        SortOption.entries.forEach { opt ->
-                            DropdownMenuItem(
-                                text    = { Text(opt.label) },
-                                onClick = {
-                                    onUpdate(source.copy(sortBy = opt))
-                                    sortExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Wiersz podglądu ──────────────────────────────────────────────────────────
-
-@Composable
-private fun PreviewTrackRow(
-    track:      Track,
-    index:      Int,
-    onRemove:   () -> Unit,
-    onMoveUp:   () -> Unit,
-    onMoveDown: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            "$index",
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(24.dp)
-        )
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                track.title,
-                style    = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "${track.artist} · ${track.formattedDuration()}",
-                style    = MaterialTheme.typography.bodySmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Column {
-            IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.KeyboardArrowUp, "W górę",
-                    modifier = Modifier.size(18.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.KeyboardArrowDown, "W dół",
-                    modifier = Modifier.size(18.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
-        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.Close, "Usuń",
-                modifier = Modifier.size(16.dp),
-                tint     = MaterialTheme.colorScheme.error)
-        }
-    }
-    HorizontalDivider(
-        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
-        modifier = Modifier.padding(start = 48.dp, end = 16.dp)
-    )
-}
-
-// ── Bottom bar ───────────────────────────────────────────────────────────────
-
-@Composable
-private fun GenerateBottomBar(
-    hasPreview:    Boolean,
-    isGenerating:  Boolean,
-    isSaving:      Boolean,
-    onGenerate:    () -> Unit,
-    onSave:        () -> Unit,
-    onOpenSpotify: () -> Unit,
-    hasSavedUrl:   Boolean
-) {
-    Surface(
-        tonalElevation = 8.dp,
-        color          = MaterialTheme.colorScheme.surface
-    ) {
-        Row(
-            modifier              = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .navigationBarsPadding(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick  = onGenerate,
-                enabled  = !isGenerating && !isSaving,
-                modifier = Modifier.weight(1f),
-                colors   = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
-            ) {
-                if (isGenerating) {
-                    CircularProgressIndicator(
-                        modifier    = Modifier.size(18.dp),
-                        color       = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Generuj")
-                }
-            }
-
-            AnimatedVisibility(hasPreview && !hasSavedUrl) {
-                Button(
-                    onClick  = onSave,
-                    enabled  = !isGenerating && !isSaving,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(
-                            modifier    = Modifier.size(18.dp),
-                            color       = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Zapisz")
-                    }
-                }
-            }
-
-            AnimatedVisibility(hasSavedUrl) {
-                OutlinedButton(
-                    onClick  = onOpenSpotify,
-                    modifier = Modifier.weight(1f),
-                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = SpotifyGreen)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Otwórz Spotify")
-                }
-            }
-        }
-    }
 }
 
 // ── Sekcja nagłówka ──────────────────────────────────────────────────────────
