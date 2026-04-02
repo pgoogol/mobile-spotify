@@ -10,14 +10,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Odpowiednik spotify_api.py + cache.py.
- *
- * Strategia cache audio features:
- *   1. Sprawdź Room (lokalny cache)
- *   2. Jeśli brak → pobierz z Web API (batch po 100)
- *   3. Zapisz wynik do Room
- */
-/**
  * Implementacja ISpotifyRepository.
  *
  * Zmiany względem poprzedniej wersji:
@@ -26,6 +18,7 @@ import javax.inject.Singleton
  *   blokował dostęp do playlist współdzielonych.
  * - Mapery używają TrackAudioFeatures (domenowy) zamiast TrackFeaturesCache (Room).
  * - Usunięto LocalCsvImportHelper (funkcja CSV została usunięta z aplikacji).
+ * - Dodano addToQueue (POST /v1/me/player/queue).
  */
 @Singleton
 class SpotifyRepository @Inject constructor(
@@ -37,13 +30,6 @@ class SpotifyRepository @Inject constructor(
     //  Playlisty użytkownika
     // ════════════════════════════════════════════════════════
 
-    /**
-     * Pobiera WSZYSTKIE playlisty użytkownika (automatyczna paginacja).
-     *
-     * Poprzednia wersja filtrowała po ownerId, co wykluczało playlisty
-     * obserwowane/collaborative. Obecna wersja zwraca wszystkie pozycje
-     * zwrócone przez endpoint /v1/me/playlists.
-     */
     override suspend fun getUserPlaylists(): List<Playlist> = withContext(Dispatchers.IO) {
         val all = mutableListOf<SpotifyPlaylist>()
         var offset = 0
@@ -60,18 +46,11 @@ class SpotifyRepository @Inject constructor(
     //  Utwory z playlisty
     // ════════════════════════════════════════════════════════
 
-    /**
-     * Pobiera WSZYSTKIE utwory z playlisty (automatyczna paginacja)
-     * i wzbogaca je o audio features z cache lub API.
-     */
     override suspend fun getPlaylistTracks(playlistId: String): List<Track> =
         withContext(Dispatchers.IO) {
             fetchAllPlaylistItems(playlistId).mapNotNull { it.track?.toDomain() }
         }
 
-    /**
-     * Polubione utwory użytkownika.
-     */
     override suspend fun getLikedTracks(): List<Track> = withContext(Dispatchers.IO) {
         val items = mutableListOf<PlaylistTrackItem>()
         var offset = 0
@@ -101,11 +80,23 @@ class SpotifyRepository @Inject constructor(
 
     override suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>) =
         withContext(Dispatchers.IO) {
-            // Spotify API akceptuje max 100 URI na jedno żądanie
             uris.chunked(100).forEach { chunk ->
                 api.addTracksToPlaylist(playlistId, AddTracksRequest(uris = chunk))
             }
         }
+
+    // ════════════════════════════════════════════════════════
+    //  Kolejka odtwarzania
+    // ════════════════════════════════════════════════════════
+
+    /**
+     * Dodaje utwór do kolejki odtwarzania.
+     * Spotify API przyjmuje jeden URI per request.
+     * Rzuca wyjątek jeśli brak aktywnego odtwarzacza (HTTP 404).
+     */
+    override suspend fun addToQueue(uri: String) = withContext(Dispatchers.IO) {
+        api.addToQueue(uri)
+    }
 
     // ════════════════════════════════════════════════════════
     //  Profil użytkownika
@@ -163,7 +154,6 @@ class SpotifyRepository @Inject constructor(
         } while (page.next != null)
         return items
     }
-
 }
 
 // ── Mapery modeli ────────────────────────────────────────────────────────────

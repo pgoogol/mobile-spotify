@@ -60,4 +60,19 @@ interface SpotifyApiService {
         @Path("playlist_id") playlistId: String,
         @Body request: AddTracksRequest
     ): Map<String, String>
+
+    // ── Odtwarzacz ─────────────────────────────────────────────────────────
+
+    /**
+     * Dodaje utwór do kolejki odtwarzania.
+     * Wymaga scope: user-modify-playback-state.
+     * Wymaga aktywnego urządzenia odtwarzającego.
+     *
+     * @param uri URI utworu, np. "spotify:track:4iV5W9uYEdYUVa79Axb7Rh"
+     * @see <a href="https://developer.spotify.com/documentation/web-api/reference/add-to-queue">Add to Queue</a>
+     */
+    @POST("v1/me/player/queue")
+    suspend fun addToQueue(
+        @Query("uri") uri: String
+    )
 }

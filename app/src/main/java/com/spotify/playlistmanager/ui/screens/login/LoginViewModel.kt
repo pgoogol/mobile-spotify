@@ -39,6 +39,7 @@ class LoginViewModel @Inject constructor(
         const val AUTH_REQUEST_CODE = 1337
 
         // Zakresy zgodne z oryginałem + playlist-modify-public dla tworzenia
+        // + user-modify-playback-state dla kolejki odtwarzania
         private val SCOPES = arrayOf(
             "playlist-read-private",
             "playlist-read-collaborative",
@@ -47,7 +48,8 @@ class LoginViewModel @Inject constructor(
             "playlist-modify-private",
             "user-read-private",
             "user-read-email",
-            "user-top-read"
+            "user-top-read",
+            "user-modify-playback-state"
         )
     }
 

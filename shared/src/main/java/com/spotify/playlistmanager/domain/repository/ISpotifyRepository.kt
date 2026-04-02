@@ -17,4 +17,13 @@ interface ISpotifyRepository {
     suspend fun getUserProfile(): UserProfile
     suspend fun getTopArtists(): List<TopArtist>
     suspend fun getLikedTracksCount(): Int
+
+    /**
+     * Dodaje utwór do kolejki odtwarzania.
+     * Wymaga scope: user-modify-playback-state.
+     * Wymaga aktywnego odtwarzacza — rzuci wyjątek jeśli brak.
+     *
+     * @param uri URI utworu (np. "spotify:track:xxx")
+     */
+    suspend fun addToQueue(uri: String)
 }

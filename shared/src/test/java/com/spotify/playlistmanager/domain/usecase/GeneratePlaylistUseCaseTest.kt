@@ -206,3 +206,373 @@ class GeneratePlaylistUseCaseTest {
         result.segments[0].tracks.forEach { assertEquals(0f, it.compositeScore, 0.001f) }
     }
 }
+
+class GeneratePlaylistUseCaseTest {
+
+    private class FakeRepository(
+        private val tracksByPlaylist: Map<String, List<Track>> = emptyMap(),
+        private val likedTracks: List<Track> = emptyList()
+    ) : ISpotifyRepository {
+        override suspend fun getUserPlaylists() = emptyList<Playlist>()
+        override suspend fun getPlaylistTracks(playlistId: String) =
+            tracksByPlaylist[playlistId] ?: emptyList()
+        override suspend fun getLikedTracks() = likedTracks
+        override suspend fun createPlaylist(name: String, description: String) = "new-id"
+        override suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>) = Unit
+        override suspend fun addToQueue(uri: String) = Unit
+        override suspend fun fetchAndCacheCurrentUser() = throw UnsupportedOperationException()
+        override suspend fun getUserProfile() = throw UnsupportedOperationException()
+        override suspend fun getTopArtists() = emptyList<TopArtist>()
+        override suspend fun getLikedTracksCount() = likedTracks.size
+    }
+
+    private class FakeFeaturesRepository(
+        private val features: Map<String, TrackAudioFeatures> = emptyMap()
+    ) : ITrackFeaturesRepository {
+        override suspend fun getFeatures(spotifyTrackId: String) = features[spotifyTrackId]
+        override suspend fun getFeaturesMap(spotifyTrackIds: List<String>) =
+            features.filter { it.key in spotifyTrackIds }
+        override suspend fun upsert(features: List<TrackAudioFeatures>) = Unit
+        override suspend fun count() = features.size
+        override suspend fun clearAll() = Unit
+    }
+
+    private fun makeTrack(
+        id: String, title: String, popularity: Int = 50, durationMs: Int = 180_000
+    ) = Track(
+        id = id, title = title, artist = "Artysta", album = "Album",
+        albumArtUrl = null, durationMs = durationMs, popularity = popularity,
+        uri = "spotify:track:$id"
+    )
+
+    private fun makeFeatures(
+        id: String, bpm: Float = 170f, energy: Float = 70f, danceability: Float = 65f
+    ) = TrackAudioFeatures(
+        spotifyTrackId = id, bpm = bpm, energy = energy,
+        danceability = danceability, valence = 50f, acousticness = 20f,
+        instrumentalness = 5f, loudness = -8f, camelot = "8B",
+        musicalKey = "Ab", timeSignature = 4, speechiness = 10f,
+        liveness = 15f, genres = "salsa", label = "Fania", isrc = "US123"
+    )
+
+    private val playlistId = "pl-1"
+    private val tracks = listOf(
+        makeTrack("t1", "Track A", popularity = 80),
+        makeTrack("t2", "Track B", popularity = 60),
+        makeTrack("t3", "Track C", popularity = 90),
+        makeTrack("t4", "Track D", popularity = 40),
+        makeTrack("t5", "Track E", popularity = 70)
+    )
+
+    private val featuresMap = mapOf(
+        "t1" to makeFeatures("t1", bpm = 150f, energy = 40f, danceability = 50f),
+        "t2" to makeFeatures("t2", bpm = 170f, energy = 60f, danceability = 65f),
+        "t3" to makeFeatures("t3", bpm = 190f, energy = 80f, danceability = 75f),
+        "t4" to makeFeatures("t4", bpm = 140f, energy = 30f, danceability = 45f),
+        "t5" to makeFeatures("t5", bpm = 200f, energy = 90f, danceability = 80f)
+    )
+
+    private lateinit var useCase: GeneratePlaylistUseCase
+
+    @Before
+    fun setUp() {
+        useCase = GeneratePlaylistUseCase(
+            FakeRepository(tracksByPlaylist = mapOf(playlistId to tracks)),
+            FakeFeaturesRepository(featuresMap)
+        )
+    }
+
+    // ── Backward compatibility: invoke() ─────────────────────────────────
+
+    @Test
+    fun `invoke returns correct track count`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3
+        )
+        assertEquals(3, useCase(listOf(source)).size)
+    }
+
+    @Test
+    fun `invoke does not exceed available tracks`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 100
+        )
+        assertEquals(5, useCase(listOf(source)).size)
+    }
+
+    @Test
+    fun `invoke sorting by popularity descending`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5,
+            sortBy = SortOption.POPULARITY
+        )
+        val result = useCase(listOf(source))
+        assertEquals(result.map { it.popularity }.sortedDescending(), result.map { it.popularity })
+    }
+
+    @Test
+    fun `invoke combines tracks from two playlists`() = runTest {
+        val pl2Tracks = listOf(makeTrack("x1", "Extra 1"), makeTrack("x2", "Extra 2"))
+        val repo = FakeRepository(tracksByPlaylist = mapOf(playlistId to tracks, "pl-2" to pl2Tracks))
+        val uc = GeneratePlaylistUseCase(repo, FakeFeaturesRepository())
+        val sources = listOf(
+            PlaylistSource(playlist = Playlist(playlistId, "P1", null, null, 5, "o"), trackCount = 2),
+            PlaylistSource(playlist = Playlist("pl-2", "P2", null, null, 2, "o"), trackCount = 2)
+        )
+        assertEquals(4, uc(sources).size)
+    }
+
+    @Test
+    fun `invoke fetches liked songs`() = runTest {
+        val liked = listOf(makeTrack("l1", "Liked 1"), makeTrack("l2", "Liked 2"))
+        val repo = FakeRepository(likedTracks = liked)
+        val uc = GeneratePlaylistUseCase(repo, FakeFeaturesRepository())
+        val source = PlaylistSource(
+            playlist = Playlist(GeneratePlaylistUseCase.LIKED_SONGS_ID, "Polubione", null, null, 2, ""),
+            trackCount = 10
+        )
+        assertEquals(2, uc(listOf(source)).size)
+    }
+
+    @Test
+    fun `invoke skips source without playlist`() = runTest {
+        assertTrue(useCase(listOf(PlaylistSource(playlist = null))).isEmpty())
+    }
+
+    // ── invoke() with excludeTrackIds ────────────────────────────────────
+
+    @Test
+    fun `invoke excludes specified track ids`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5
+        )
+        val result = useCase(listOf(source), excludeTrackIds = setOf("t1", "t3"))
+        assertEquals(3, result.size)
+        assertTrue(result.none { it.id == "t1" || it.id == "t3" })
+    }
+
+    @Test
+    fun `invoke with all tracks excluded returns empty`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5
+        )
+        val allIds = tracks.mapNotNull { it.id }.toSet()
+        val result = useCase(listOf(source), excludeTrackIds = allIds)
+        assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun `invoke deduplicates across segments within single call`() = runTest {
+        // Oba segmenty z tej samej playlisty — nie powinny się powtarzać
+        val source1 = PlaylistSource(
+            playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
+            trackCount = 3
+        )
+        val source2 = PlaylistSource(
+            playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
+            trackCount = 3
+        )
+        val result = useCase(listOf(source1, source2))
+        val ids = result.mapNotNull { it.id }
+        assertEquals("No duplicate track IDs", ids.size, ids.toSet().size)
+    }
+
+    // ── generateWithCurves() ─────────────────────────────────────────────
+
+    @Test
+    fun `generateWithCurves with None curve uses sorting`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            sortBy = SortOption.POPULARITY,
+            energyCurve = EnergyCurve.None
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        assertEquals(3, result.generateResult.tracks.size)
+        assertEquals(1, result.generateResult.segments.size)
+        assertEquals(1f, result.generateResult.overallMatchPercentage, 0.001f)
+    }
+
+    @Test
+    fun `generateWithCurves with energy curve matches tracks`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 4,
+            energyCurve = EnergyCurve.SalsaRomantica
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        assertEquals(4, result.generateResult.tracks.size)
+        assertEquals(1, result.generateResult.segments.size)
+        assertEquals(4, result.generateResult.segments[0].targetScores.size)
+        assertTrue(result.generateResult.overallMatchPercentage in 0f..1f)
+    }
+
+    @Test
+    fun `generateWithCurves multi-segment with smooth join`() = runTest {
+        val sources = listOf(
+            PlaylistSource(
+                playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
+                trackCount = 3, energyCurve = EnergyCurve.SalsaRomantica
+            ),
+            PlaylistSource(
+                playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
+                trackCount = 2, energyCurve = EnergyCurve.SalsaRapida
+            )
+        )
+        val result = useCase.generateWithCurves(sources, smoothJoin = true)
+        assertEquals(5, result.generateResult.tracks.size)
+        assertEquals(2, result.generateResult.segments.size)
+    }
+
+    @Test
+    fun `generateWithCurves without features maps to score 0`() = runTest {
+        val uc = GeneratePlaylistUseCase(
+            FakeRepository(tracksByPlaylist = mapOf(playlistId to tracks)),
+            FakeFeaturesRepository(emptyMap())
+        )
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3, energyCurve = EnergyCurve.SalsaRomantica
+        )
+        val result = uc.generateWithCurves(listOf(source))
+        assertEquals(3, result.generateResult.tracks.size)
+        result.generateResult.segments[0].tracks.forEach {
+            assertEquals(0f, it.compositeScore, 0.001f)
+        }
+    }
+
+    // ── generateWithCurves() with excludeTrackIds ────────────────────────
+
+    @Test
+    fun `generateWithCurves excludes specified track ids`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5,
+            energyCurve = EnergyCurve.None,
+            sortBy = SortOption.POPULARITY
+        )
+        val result = useCase.generateWithCurves(
+            listOf(source),
+            excludeTrackIds = setOf("t1", "t3")
+        )
+        assertEquals(3, result.generateResult.tracks.size)
+        assertTrue(result.generateResult.tracks.none { it.id == "t1" || it.id == "t3" })
+    }
+
+    @Test
+    fun `generateWithCurves returns exhaustion statuses`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.None
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        assertTrue(result.exhaustionStatuses.isNotEmpty())
+        val status = result.exhaustionStatuses.first()
+        assertEquals(playlistId, status.playlistId)
+        assertEquals(5, status.totalTracks)
+        assertEquals(3, status.usedTracks)
+    }
+
+    @Test
+    fun `generateWithCurves detects full exhaustion`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5,
+            energyCurve = EnergyCurve.None
+        )
+        // Wyklucz wszystkie 5 → playlista wyczerpana, 0 utworów
+        val result = useCase.generateWithCurves(
+            listOf(source),
+            excludeTrackIds = setOf("t1", "t2", "t3", "t4", "t5")
+        )
+        assertTrue(result.generateResult.tracks.isEmpty())
+        assertTrue(result.exhaustedPlaylists.isNotEmpty())
+        assertTrue(result.exhaustedPlaylists.first().exhausted)
+    }
+
+    @Test
+    fun `generateWithCurves returns newly generated track ids`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.None
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        assertEquals(3, result.allGeneratedTrackIds.size)
+        // Każdy wygenerowany utwór powinien być w allGeneratedTrackIds
+        result.generateResult.tracks.forEach { track ->
+            assertTrue(track.id in result.allGeneratedTrackIds)
+        }
+    }
+
+    @Test
+    fun `generateWithCurves deduplicates across segments`() = runTest {
+        val sources = listOf(
+            PlaylistSource(
+                playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
+                trackCount = 3, energyCurve = EnergyCurve.None
+            ),
+            PlaylistSource(
+                playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
+                trackCount = 3, energyCurve = EnergyCurve.None
+            )
+        )
+        val result = useCase.generateWithCurves(sources)
+        val trackIds = result.generateResult.tracks.mapNotNull { it.id }
+        assertEquals("No duplicate track IDs across segments",
+            trackIds.size, trackIds.toSet().size)
+        // Max 5 z jednej playlisty
+        assertTrue(trackIds.size <= 5)
+    }
+
+    // ── calculateExhaustionStatuses() ────────────────────────────────────
+
+    @Test
+    fun `calculateExhaustionStatuses with no used tracks`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3
+        )
+        val statuses = useCase.calculateExhaustionStatuses(
+            listOf(source), usedTrackIds = emptySet()
+        )
+        assertEquals(1, statuses.size)
+        assertEquals(5, statuses[0].totalTracks)
+        assertEquals(0, statuses[0].usedTracks)
+        assertFalse(statuses[0].exhausted)
+    }
+
+    @Test
+    fun `calculateExhaustionStatuses with some used tracks`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3
+        )
+        val statuses = useCase.calculateExhaustionStatuses(
+            listOf(source), usedTrackIds = setOf("t1", "t2")
+        )
+        assertEquals(2, statuses[0].usedTracks)
+        assertEquals(3, statuses[0].remainingTracks)
+        assertFalse(statuses[0].exhausted)
+    }
+
+    @Test
+    fun `calculateExhaustionStatuses with all used tracks`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5
+        )
+        val statuses = useCase.calculateExhaustionStatuses(
+            listOf(source), usedTrackIds = setOf("t1", "t2", "t3", "t4", "t5")
+        )
+        assertTrue(statuses[0].exhausted)
+        assertEquals(0, statuses[0].remainingTracks)
+        assertEquals(1f, statuses[0].usagePercent, 0.001f)
+    }
+}
