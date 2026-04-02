@@ -87,7 +87,7 @@ import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
-import com.spotify.playlistmanager.domain.model.GenerationRound
+import com.spotify.playlistmanager.util.toHoursMinutesSeconds
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.ui.components.EnergyCurveChart
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
@@ -103,7 +103,6 @@ fun GenerateScreen(
     val context = LocalContext.current
 
     var showSaveTemplateDialog by remember { mutableStateOf(false) }
-    var showHistorySection by remember { mutableStateOf(false) }
     var showTargetPlaylistPicker by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -283,46 +282,13 @@ fun GenerateScreen(
                 }
             }
 
-            // ── Historia sesji ───────────────────────────────────────────
-            if (state.generationHistory.isNotEmpty()) {
-                item { Spacer(Modifier.height(8.dp)) }
-                item {
-                    SectionHeader(
-                        title = "Historia sesji (${state.generationHistory.size} rund)",
-                        action = {
-                            Row {
-                                IconButton(onClick = viewModel::undoLastSegment) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.Undo, "Cofnij ostatni",
-                                        tint = MaterialTheme.colorScheme.primary)
-                                }
-                                IconButton(onClick = { showHistorySection = !showHistorySection }) {
-                                    Icon(
-                                        if (showHistorySection) Icons.Default.KeyboardArrowUp
-                                        else Icons.Default.KeyboardArrowDown,
-                                        "Pokaż/ukryj historię"
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
-
-                if (showHistorySection) {
-                    state.generationHistory.forEach { round ->
-                        item(key = "history_${round.roundNumber}") {
-                            HistoryRoundCard(round = round)
-                        }
-                    }
-                }
-            }
-
             // ── Podgląd wygenerowanej playlisty ─────────────────────────
             state.previewTracks?.let { tracks ->
                 item { Spacer(Modifier.height(8.dp)) }
                 item {
+                    val totalDuration = tracks.sumOf { it.durationMs.toLong() }
                     SectionHeader(
-                        title = "Podgląd (${tracks.size} utworów)",
+                        title = "Podgląd (${tracks.size} utworów · ${totalDuration.toHoursMinutesSeconds()})",
                         action = {
                             TextButton(onClick = viewModel::clearSavedState) {
                                 Text("Wyczyść")
@@ -566,59 +532,6 @@ private fun ExhaustionBar(status: ExhaustionStatus) {
                         else SpotifyGreen,
                 trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
             )
-        }
-    }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  History Round Card
-// ══════════════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun HistoryRoundCard(round: GenerationRound) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        shape = RoundedCornerShape(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = SpotifyGreen.copy(alpha = 0.15f),
-                modifier = Modifier.size(32.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        "${round.roundNumber}",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = SpotifyGreen
-                        )
-                    )
-                }
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    round.templateName,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "${round.tracks.size} utworów",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
         }
     }
 }

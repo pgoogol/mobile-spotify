@@ -15,7 +15,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.5.5"
+        versionName = "0.6.2"
 
         // ⚠️  Uzupełnij własne dane z developer.spotify.com/dashboard
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"3298169ef5a64bf39b6c1466e304c790\"")
