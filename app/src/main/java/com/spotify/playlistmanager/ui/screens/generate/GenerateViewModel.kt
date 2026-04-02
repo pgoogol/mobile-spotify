@@ -14,7 +14,6 @@ import javax.inject.Inject
 
 // ── Stan ekranu generowania ──────────────────────────────────────────────────
 data class GenerateUiState(
-    // ── Obecne pola (backward compatible) ─────────────────────────────────
     val availablePlaylists: List<Playlist> = emptyList(),
     val sources: List<PlaylistSource> = listOf(PlaylistSource()),
     val newPlaylistName: String = "Nowa Playlista",
@@ -27,17 +26,19 @@ data class GenerateUiState(
     val savedPlaylistUrl: String? = null,
     val error: String? = null,
 
-    // ── Nowe pola: tryby i sesja ──────────────────────────────────────────
-    /** Aktualny tryb generowania. */
-    val generationMode: GenerationMode = GenerationMode.EXHAUST,
+    // ── Repeat count ──────────────────────────────────────────────────────
+    /** Ile razy powtórzyć cały szablon (1–100). */
+    val repeatCount: Int = 1,
 
-    /** Cele wyjściowe (multi-select w trybie SEGMENT). */
+    // ── Cele wyjściowe (zawsze widoczne) ──────────────────────────────────
+    /** Cele wyjściowe (multi-select). */
     val targetActions: Set<TargetAction> = setOf(TargetAction.NEW_PLAYLIST),
 
     /** ID istniejącej playlisty do której dodajemy (gdy EXISTING_PLAYLIST). */
     val targetPlaylistId: String? = null,
     val targetPlaylistName: String? = null,
 
+    // ── Sesja generowania ─────────────────────────────────────────────────
     /** Zbiór ID już użytych utworów — globalna deduplikacja w sesji. */
     val usedTrackIds: Set<String> = emptySet(),
 
@@ -50,14 +51,14 @@ data class GenerateUiState(
     /** Czy sesja jest aktywna (przynajmniej jedna runda). */
     val isSessionActive: Boolean = false,
 
-    /** Shuffle przed zapisem. */
-    val shuffleBeforeSave: Boolean = false,
-
     /** Czy wyświetlać dry-run dialog dla queue. */
     val showQueueDryRun: Boolean = false,
 
     /** Czy dodawanie do kolejki jest w toku. */
-    val isAddingToQueue: Boolean = false
+    val isAddingToQueue: Boolean = false,
+
+    /** Postęp generowania w pętli repeat (0..repeatCount). */
+    val repeatProgress: Int = 0
 )
 
 @HiltViewModel
@@ -115,19 +116,23 @@ class GenerateViewModel @Inject constructor(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Tryby i ustawienia sesji
+    //  Repeat count
     // ══════════════════════════════════════════════════════════════════════
 
-    fun onGenerationModeChange(mode: GenerationMode) {
-        _state.update { it.copy(generationMode = mode) }
+    fun onRepeatCountChange(count: Int) {
+        _state.update { it.copy(repeatCount = count.coerceIn(1, 100)) }
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Cele wyjściowe
+    // ══════════════════════════════════════════════════════════════════════
 
     fun toggleTargetAction(action: TargetAction) {
         _state.update { state ->
             val current = state.targetActions.toMutableSet()
             if (action in current) {
-                // NEW_PLAYLIST nie może być usunięty jeśli jest jedyny
-                if (current.size > 1 || action != TargetAction.NEW_PLAYLIST) {
+                // Musi zostać przynajmniej jeden cel
+                if (current.size > 1) {
                     current.remove(action)
                 }
             } else {
@@ -146,21 +151,13 @@ class GenerateViewModel @Inject constructor(
         }
     }
 
-    fun onShuffleBeforeSaveChange(enabled: Boolean) {
-        _state.update { it.copy(shuffleBeforeSave = enabled) }
-    }
-
     // ══════════════════════════════════════════════════════════════════════
-    //  Modyfikacja nazwy
+    //  Modyfikacja nazwy / Smooth Join
     // ══════════════════════════════════════════════════════════════════════
 
     fun onPlaylistNameChange(name: String) {
         _state.update { it.copy(newPlaylistName = name) }
     }
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  Smooth Join toggle
-    // ══════════════════════════════════════════════════════════════════════
 
     fun onSmoothJoinChange(enabled: Boolean) {
         _state.update { it.copy(smoothJoin = enabled) }
@@ -185,13 +182,17 @@ class GenerateViewModel @Inject constructor(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Generowanie — główna logika z deduplikacją
+    //  Generowanie — główna logika z repeat loop
     // ══════════════════════════════════════════════════════════════════════
 
     /**
-     * Generuje podgląd — dodaje nowe utwory do sesji (zachowuje historię).
-     * W trybie EXHAUST: generuje pełny szablon.
-     * W trybie SEGMENT: generuje dokładną porcję z szablonu.
+     * Generuje podgląd — wykonuje szablon [repeatCount] razy.
+     *
+     * Każda iteracja:
+     *  1. Wywołuje use-case z bieżącą exclusion listą
+     *  2. Akumuluje wyniki w podglądzie
+     *  3. Dodaje rundę do historii
+     *  4. Jeśli pula wyczerpana → przerywa wcześniej
      */
     fun generatePreview() {
         val sources = _state.value.sources.filter { it.playlist != null }
@@ -213,33 +214,122 @@ class GenerateViewModel @Inject constructor(
         }
 
         val currentState = _state.value
+        val repeatCount = currentState.repeatCount
         val hasCurves = sources.any { it.energyCurve !is EnergyCurve.None }
+        val templateName = resolveTemplateName(sources)
 
         viewModelScope.launch {
             _state.update {
-                it.copy(isGenerating = true, error = null)
+                it.copy(isGenerating = true, error = null, repeatProgress = 0)
             }
 
-            if (hasCurves) {
-                runCatching {
-                    generatePlaylist.generateWithCurves(
-                        sources = sources,
-                        smoothJoin = currentState.smoothJoin,
-                        excludeTrackIds = currentState.usedTrackIds
+            var runningUsedIds = currentState.usedTrackIds
+            val newRounds = mutableListOf<GenerationRound>()
+            val allNewTracks = mutableListOf<Track>()
+            var lastGenerateResult: GenerateResult? = null
+            var lastExhaustionStatuses = emptyList<ExhaustionStatus>()
+            var exhausted = false
+
+            for (iteration in 1..repeatCount) {
+                _state.update { it.copy(repeatProgress = iteration) }
+
+                if (hasCurves) {
+                    val result = runCatching {
+                        generatePlaylist.generateWithCurves(
+                            sources = sources,
+                            smoothJoin = currentState.smoothJoin,
+                            excludeTrackIds = runningUsedIds
+                        )
+                    }.getOrElse { e ->
+                        _state.update {
+                            it.copy(isGenerating = false, error = e.message, repeatProgress = 0)
+                        }
+                        return@launch
+                    }
+
+                    val newTracks = result.generateResult.tracks
+                    lastGenerateResult = result.generateResult
+                    lastExhaustionStatuses = result.exhaustionStatuses
+
+                    if (newTracks.isEmpty()) {
+                        // Pula wyczerpana — przerwij pętlę
+                        exhausted = true
+                        break
+                    }
+
+                    val newIds = result.allGeneratedTrackIds
+                    runningUsedIds = runningUsedIds + newIds
+                    allNewTracks.addAll(newTracks)
+
+                    val round = GenerationRound(
+                        roundNumber = currentState.generationHistory.size + newRounds.size + 1,
+                        templateName = templateName,
+                        trackIds = newIds,
+                        tracks = newTracks
                     )
-                }.onSuccess { result ->
-                    handleGenerationSuccess(result, sources)
-                }.onFailure { e ->
-                    _state.update { it.copy(isGenerating = false, error = e.message) }
+                    newRounds.add(round)
+
+                    // Jeśli któraś playlista się wyczerpała, przerwij
+                    if (result.exhaustedPlaylists.isNotEmpty()) {
+                        exhausted = true
+                        break
+                    }
+                } else {
+                    // Ścieżka bez krzywych
+                    val tracks = runCatching {
+                        generatePlaylist(sources, runningUsedIds)
+                    }.getOrElse { e ->
+                        _state.update {
+                            it.copy(isGenerating = false, error = e.message, repeatProgress = 0)
+                        }
+                        return@launch
+                    }
+
+                    if (tracks.isEmpty()) {
+                        exhausted = true
+                        break
+                    }
+
+                    val newIds = tracks.mapNotNull { it.id }.toSet()
+                    runningUsedIds = runningUsedIds + newIds
+                    allNewTracks.addAll(tracks)
+
+                    val round = GenerationRound(
+                        roundNumber = currentState.generationHistory.size + newRounds.size + 1,
+                        templateName = templateName,
+                        trackIds = newIds,
+                        tracks = tracks
+                    )
+                    newRounds.add(round)
                 }
-            } else {
-                // Backward compatible path z excludeTrackIds
-                runCatching {
-                    generatePlaylist(sources, currentState.usedTrackIds)
-                }.onSuccess { tracks ->
-                    handleSimpleGenerationSuccess(tracks, sources)
-                }.onFailure { e ->
-                    _state.update { it.copy(isGenerating = false, error = e.message) }
+            }
+
+            // Kumuluj podgląd: istniejące + nowe
+            val cumulativePreview = (currentState.previewTracks ?: emptyList()) + allNewTracks
+
+            _state.update {
+                it.copy(
+                    isGenerating = false,
+                    repeatProgress = 0,
+                    previewTracks = cumulativePreview.ifEmpty { it.previewTracks },
+                    generateResult = lastGenerateResult ?: it.generateResult,
+                    usedTrackIds = runningUsedIds,
+                    generationHistory = it.generationHistory + newRounds,
+                    exhaustionStatuses = lastExhaustionStatuses.ifEmpty { it.exhaustionStatuses },
+                    isSessionActive = (it.generationHistory + newRounds).isNotEmpty()
+                )
+            }
+
+            // Komunikaty
+            val completedRounds = newRounds.size
+            if (exhausted && allNewTracks.isEmpty()) {
+                _state.update {
+                    it.copy(error = "Playlisty wyczerpane — brak nowych utworów do wygenerowania.")
+                }
+            } else if (exhausted) {
+                _state.update {
+                    it.copy(error = "Playlisty wyczerpane po $completedRounds z $repeatCount powtórzeń. " +
+                            "Wygenerowano ${allNewTracks.size} utworów.")
                 }
             }
         }
@@ -264,104 +354,10 @@ class GenerateViewModel @Inject constructor(
     }
 
     /**
-     * Dodaj więcej — zachowuje sesję i generuje kolejną rundę.
+     * Dodaj więcej — zachowuje sesję i generuje kolejną rundę/rundy.
      */
     fun generateMore() {
         generatePreview()
-    }
-
-    private fun handleGenerationSuccess(
-        result: GeneratePlaylistUseCase.GenerateWithExhaustionResult,
-        sources: List<PlaylistSource>
-    ) {
-        val currentState = _state.value
-        val newTrackIds = result.allGeneratedTrackIds
-        val newTracks = result.generateResult.tracks
-
-        // Sprawdź wyczerpanie w trybie EXHAUST
-        if (currentState.generationMode == GenerationMode.EXHAUST &&
-            result.exhaustedPlaylists.isNotEmpty() && newTracks.isEmpty()) {
-            val names = result.exhaustedPlaylists.joinToString(", ") { it.playlistName }
-            _state.update {
-                it.copy(
-                    isGenerating = false,
-                    error = "Playlisty wyczerpane: $names — brak nowych utworów do wygenerowania.",
-                    exhaustionStatuses = result.exhaustionStatuses
-                )
-            }
-            return
-        }
-
-        // Utwórz rekord historii
-        val round = GenerationRound(
-            roundNumber = currentState.generationHistory.size + 1,
-            templateName = resolveTemplateName(sources),
-            trackIds = newTrackIds,
-            tracks = newTracks,
-            generationMode = currentState.generationMode
-        )
-
-        // Kumuluj podgląd: istniejące + nowe
-        val cumulativePreview = (currentState.previewTracks ?: emptyList()) + newTracks
-
-        _state.update {
-            it.copy(
-                isGenerating = false,
-                previewTracks = cumulativePreview,
-                generateResult = result.generateResult,
-                usedTrackIds = it.usedTrackIds + newTrackIds,
-                generationHistory = it.generationHistory + round,
-                exhaustionStatuses = result.exhaustionStatuses,
-                isSessionActive = true
-            )
-        }
-
-        // Komunikat o wyczerpaniu (jeśli częściowo wyczerpane ale wygenerowało coś)
-        if (result.exhaustedPlaylists.isNotEmpty()) {
-            val names = result.exhaustedPlaylists.joinToString(", ") { it.playlistName }
-            _state.update {
-                it.copy(error = "Uwaga: wyczerpane playlisty: $names. " +
-                        "Wygenerowano ${newTracks.size} utworów.")
-            }
-        }
-    }
-
-    private fun handleSimpleGenerationSuccess(
-        tracks: List<Track>,
-        sources: List<PlaylistSource>
-    ) {
-        val currentState = _state.value
-        val newTrackIds = tracks.mapNotNull { it.id }.toSet()
-
-        if (currentState.generationMode == GenerationMode.EXHAUST && tracks.isEmpty()) {
-            _state.update {
-                it.copy(
-                    isGenerating = false,
-                    error = "Brak nowych utworów do wygenerowania — playlisty wyczerpane."
-                )
-            }
-            return
-        }
-
-        val round = GenerationRound(
-            roundNumber = currentState.generationHistory.size + 1,
-            templateName = resolveTemplateName(sources),
-            trackIds = newTrackIds,
-            tracks = tracks,
-            generationMode = currentState.generationMode
-        )
-
-        val cumulativePreview = (currentState.previewTracks ?: emptyList()) + tracks
-
-        _state.update {
-            it.copy(
-                isGenerating = false,
-                previewTracks = cumulativePreview,
-                usedTrackIds = it.usedTrackIds + newTrackIds,
-                generationHistory = it.generationHistory + round,
-                isSessionActive = true
-            )
-        }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -373,7 +369,6 @@ class GenerateViewModel @Inject constructor(
         val history = currentState.generationHistory
         if (history.isEmpty()) return
 
-        val lastRound = history.last()
         val remainingHistory = history.dropLast(1)
 
         // Przelicz usedTrackIds z pozostałych rund
@@ -389,7 +384,7 @@ class GenerateViewModel @Inject constructor(
                 usedTrackIds = recalculatedUsedIds,
                 generationHistory = remainingHistory,
                 previewTracks = recalculatedPreview.ifEmpty { null },
-                generateResult = null, // Wyczyść stary result (wykres będzie nieaktualny)
+                generateResult = null,
                 isSessionActive = remainingHistory.isNotEmpty()
             )
         }
@@ -445,24 +440,11 @@ class GenerateViewModel @Inject constructor(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Shuffle before save
-    // ══════════════════════════════════════════════════════════════════════
-
-    /**
-     * Miesza podgląd przed zapisem.
-     * Jeśli shuffleBeforeSave jest włączony, wywoływane automatycznie przed save.
-     */
-    private fun applyShuffleIfNeeded(): List<Track>? {
-        val tracks = _state.value.previewTracks ?: return null
-        return if (_state.value.shuffleBeforeSave) tracks.shuffled() else tracks
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    //  Zapis do Spotify — nowa playlista
+    //  Zapis do Spotify
     // ══════════════════════════════════════════════════════════════════════
 
     fun saveToSpotify() {
-        val tracks = applyShuffleIfNeeded()
+        val tracks = _state.value.previewTracks
         val name = _state.value.newPlaylistName.trim().ifBlank { "Nowa Playlista" }
         if (tracks.isNullOrEmpty()) {
             _state.update { it.copy(error = "Brak utworów do zapisania") }
@@ -513,7 +495,7 @@ class GenerateViewModel @Inject constructor(
                 }
             }
 
-            // Kolejka — wymaga osobnego flow (dry-run dialog)
+            // Kolejka — dry-run dialog
             if (!hasError && TargetAction.QUEUE in targetActions) {
                 _state.update { it.copy(showQueueDryRun = true, isSaving = false) }
                 return@launch
@@ -537,7 +519,7 @@ class GenerateViewModel @Inject constructor(
     }
 
     fun confirmAddToQueue() {
-        val tracks = applyShuffleIfNeeded()
+        val tracks = _state.value.previewTracks
         if (tracks.isNullOrEmpty()) return
 
         viewModelScope.launch {
@@ -579,9 +561,6 @@ class GenerateViewModel @Inject constructor(
     //  Reset i czyszczenie
     // ══════════════════════════════════════════════════════════════════════
 
-    /**
-     * Czyści cały stan po zapisie — pełny reset sesji.
-     */
     fun clearSavedState() {
         _state.update {
             it.copy(
@@ -592,9 +571,6 @@ class GenerateViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Pełny reset sesji — czyści historię, usedTrackIds, podgląd.
-     */
     fun resetSession() {
         _state.update {
             it.copy(

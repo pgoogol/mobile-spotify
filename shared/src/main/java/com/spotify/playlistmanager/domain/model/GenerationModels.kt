@@ -3,19 +3,8 @@ package com.spotify.playlistmanager.domain.model
 import com.spotify.playlistmanager.data.model.Track
 
 /**
- * Tryb generowania playlisty.
- *
- * EXHAUST — generuj wszystko z szablonu, powtarzaj aż do wyczerpania puli.
- * SEGMENT — generuj dokładną porcję z szablonu, iteracyjnie buduj playlistę.
- */
-enum class GenerationMode {
-    EXHAUST,
-    SEGMENT
-}
-
-/**
  * Cel wyjściowy wygenerowanych utworów.
- * W trybie SEGMENT użytkownik może wybrać kilka jednocześnie.
+ * Użytkownik może wybrać kilka jednocześnie (multi-select).
  */
 enum class TargetAction {
     /** Utwórz nową playlistę na Spotify. */
@@ -29,20 +18,21 @@ enum class TargetAction {
 /**
  * Runda generowania — wpis w historii sesji.
  *
+ * Jedna runda = jedno wywołanie szablonu. Jeśli repeatCount=3,
+ * to powstają 3 rundy (każda z innym zestawem utworów).
+ *
  * @param roundNumber numer kolejny rundy w sesji (1-based)
  * @param templateName nazwa szablonu użytego do generowania
  * @param trackIds ID wygenerowanych utworów w tej rundzie
  * @param tracks wygenerowane utwory (do podglądu/undo)
  * @param timestamp czas wygenerowania
- * @param generationMode tryb użyty w tej rundzie
  */
 data class GenerationRound(
     val roundNumber: Int,
     val templateName: String,
     val trackIds: Set<String>,
     val tracks: List<Track>,
-    val timestamp: Long = System.currentTimeMillis(),
-    val generationMode: GenerationMode
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 /**
@@ -52,7 +42,6 @@ data class GenerationRound(
  * @param playlistName nazwa playlisty
  * @param totalTracks łączna liczba utworów w playliście
  * @param usedTracks liczba już użytych (w excludeTrackIds) utworów
- * @param exhausted czy playlista jest w pełni wyczerpana
  */
 data class ExhaustionStatus(
     val playlistId: String,
