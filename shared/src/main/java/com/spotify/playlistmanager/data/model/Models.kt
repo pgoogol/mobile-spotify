@@ -61,12 +61,12 @@ data class SpotifyAlbum(
 )
 
 data class SpotifyUser(
-    val id:           String,
+    val id: String,
     val display_name: String?,
-    val email:        String?,
-    val images:       List<SpotifyImage>,
-    val country:      String?       = null,
-    val followers:    FollowersRef? = null
+    val email: String?,
+    val images: List<SpotifyImage>,
+    val country: String? = null,
+    val followers: FollowersRef? = null
 )
 
 data class CreatePlaylistRequest(
@@ -87,17 +87,17 @@ data class ExternalUrls(val spotify: String)
 
 data class TopArtistsResponse(
     val items: List<SpotifyArtistFull>,
-    val next:  String?,
+    val next: String?,
     val total: Int
 )
 
 data class SpotifyArtistFull(
-    val id:         String,
-    val name:       String,
-    val images:     List<SpotifyImage>,
-    val genres:     List<String>,
+    val id: String,
+    val name: String,
+    val images: List<SpotifyImage>,
+    val genres: List<String>,
     val popularity: Int,
-    val followers:  FollowersRef
+    val followers: FollowersRef
 )
 
 data class FollowersRef(val total: Int)
@@ -114,7 +114,9 @@ data class Track(
     val albumArtUrl: String?,
     val durationMs: Int,
     val popularity: Int,
-    val uri: String?
+    val uri: String?,
+    val releaseDate: String? = null,
+    val previewUrl: String? = null
 ) {
     fun formattedDuration(): String {
         val totalSeconds = durationMs / 1000
@@ -148,19 +150,19 @@ data class PlaylistStats(
 }
 
 data class UserProfile(
-    val id:          String,
+    val id: String,
     val displayName: String?,
-    val email:       String?,
-    val imageUrl:    String?,
-    val country:     String?,
-    val followers:   Int
+    val email: String?,
+    val imageUrl: String?,
+    val country: String?,
+    val followers: Int
 )
 
 data class TopArtist(
-    val id:         String,
-    val name:       String,
-    val imageUrl:   String?,
-    val genres:     List<String>,
+    val id: String,
+    val name: String,
+    val imageUrl: String?,
+    val genres: List<String>,
     val popularity: Int
 )
 

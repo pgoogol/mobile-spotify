@@ -111,12 +111,12 @@ class SpotifyRepository @Inject constructor(
     override suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
         val user = api.getCurrentUser()
         UserProfile(
-            id          = user.id,
+            id = user.id,
             displayName = user.display_name,
-            email       = user.email,
-            imageUrl    = user.images.firstOrNull()?.url,
-            country     = user.country,
-            followers   = user.followers?.total ?: 0
+            email = user.email,
+            imageUrl = user.images.firstOrNull()?.url,
+            country = user.country,
+            followers = user.followers?.total ?: 0
         )
     }
 
@@ -124,10 +124,10 @@ class SpotifyRepository @Inject constructor(
         runCatching {
             api.getTopArtists(limit = 20).items.map { artist ->
                 TopArtist(
-                    id         = artist.id,
-                    name       = artist.name,
-                    imageUrl   = artist.images.firstOrNull()?.url,
-                    genres     = artist.genres,
+                    id = artist.id,
+                    name = artist.name,
+                    imageUrl = artist.images.firstOrNull()?.url,
+                    genres = artist.genres,
                     popularity = artist.popularity
                 )
             }
@@ -159,21 +159,23 @@ class SpotifyRepository @Inject constructor(
 // ── Mapery modeli ────────────────────────────────────────────────────────────
 
 private fun SpotifyPlaylist.toDomain() = Playlist(
-    id         = id,
-    name       = name,
+    id = id,
+    name = name,
     description = description,
-    imageUrl   = images.firstOrNull()?.url,
+    imageUrl = images.firstOrNull()?.url,
     trackCount = tracks.total,
-    ownerId    = owner.id
+    ownerId = owner.id
 )
 
 private fun SpotifyTrack.toDomain() = Track(
-    id          = id,
-    title       = name,
-    artist      = artists.joinToString(", ") { it.name },
-    album       = album.name,
+    id = id,
+    title = name,
+    artist = artists.joinToString(", ") { it.name },
+    album = album.name,
     albumArtUrl = album.images.firstOrNull()?.url,
-    durationMs  = duration_ms,
-    popularity  = popularity,
-    uri         = uri
+    durationMs = duration_ms,
+    popularity = popularity,
+    uri = uri,
+    releaseDate = album.release_date,
+    previewUrl = preview_url
 )

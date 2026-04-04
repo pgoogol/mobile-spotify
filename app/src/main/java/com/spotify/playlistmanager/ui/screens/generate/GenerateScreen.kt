@@ -1,8 +1,10 @@
 @file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.spotify.playlistmanager.ui.screens.generate
 
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +26,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
@@ -32,12 +33,10 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -76,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,22 +83,21 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
-import com.spotify.playlistmanager.util.toHoursMinutesSeconds
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.ui.components.EnergyCurveChart
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
+import com.spotify.playlistmanager.util.toHoursMinutesSeconds
 
 @Composable
 fun GenerateScreen(
-    onBack:        () -> Unit,
-    onTemplates:   () -> Unit,
-    viewModel:     GenerateViewModel = hiltViewModel()
+    onBack: () -> Unit, onTemplates: () -> Unit, viewModel: GenerateViewModel = hiltViewModel()
 ) {
-    val state         by viewModel.state.collectAsStateWithLifecycle()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val templateCount by viewModel.templateCount.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -121,61 +120,55 @@ fun GenerateScreen(
 
     val hasCurves = state.sources.any { it.energyCurve !is EnergyCurve.None }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Generuj playlistę", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Wstecz")
-                    }
-                },
-                actions = {
-                    if (state.isSessionActive) {
-                        IconButton(onClick = viewModel::resetSession) {
-                            Icon(Icons.Default.Refresh, "Reset sesji")
-                        }
-                    }
-                    IconButton(onClick = { showSaveTemplateDialog = true }) {
-                        Icon(Icons.Default.Save, "Zapisz szablon")
-                    }
-                    IconButton(onClick = onTemplates) {
-                        BadgedBox(
-                            badge = {
-                                if (templateCount > 0) {
-                                    Badge { Text("$templateCount") }
-                                }
-                            }
-                        ) {
-                            Icon(Icons.Default.Description, "Szablony")
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            GenerateBottomBar(
-                state = state,
-                onGenerate = {
-                    if (state.isSessionActive) viewModel.generateMore()
-                    else viewModel.generatePreview()
-                },
-                onGenerateFromScratch = viewModel::generateFromScratch,
-                onSave = viewModel::saveToSpotify,
-                onOpenSpotify = {
-                    state.savedPlaylistUrl?.let { url ->
-                        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text("Generuj playlistę", fontWeight = FontWeight.Bold) },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Wstecz")
+                }
+            },
+            actions = {
+                if (state.isSessionActive) {
+                    IconButton(onClick = viewModel::resetSession) {
+                        Icon(Icons.Default.Refresh, "Reset sesji")
                     }
                 }
+                IconButton(onClick = { showSaveTemplateDialog = true }) {
+                    Icon(Icons.Default.Save, "Zapisz szablon")
+                }
+                IconButton(onClick = onTemplates) {
+                    BadgedBox(
+                        badge = {
+                            if (templateCount > 0) {
+                                Badge { Text("$templateCount") }
+                            }
+                        }) {
+                        Icon(Icons.Default.Description, "Szablony")
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.background
             )
-        }
-    ) { padding ->
+        )
+    }, snackbarHost = { SnackbarHost(snackbarHostState) }, bottomBar = {
+        GenerateBottomBar(
+            state = state,
+            onGenerate = {
+                if (state.isSessionActive) viewModel.generateMore()
+                else viewModel.generatePreview()
+            },
+            onGenerateFromScratch = viewModel::generateFromScratch,
+            onSave = viewModel::saveToSpotify,
+            onOpenSpotify = {
+                state.savedPlaylistUrl?.let { url ->
+                    context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+                }
+            })
+    }) { padding ->
         LazyColumn(
-            modifier       = Modifier
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
             contentPadding = PaddingValues(bottom = 16.dp)
@@ -183,7 +176,7 @@ fun GenerateScreen(
             // ── Nazwa nowej playlisty ────────────────────────────────────
             item {
                 PlaylistNameField(
-                    name     = state.newPlaylistName,
+                    name = state.newPlaylistName,
                     onChange = viewModel::onPlaylistNameChange,
                     modifier = Modifier.padding(16.dp)
                 )
@@ -195,15 +188,13 @@ fun GenerateScreen(
                     selectedActions = state.targetActions,
                     targetPlaylistName = state.targetPlaylistName,
                     onToggleAction = viewModel::toggleTargetAction,
-                    onPickPlaylist = { showTargetPlaylistPicker = true }
-                )
+                    onPickPlaylist = { showTargetPlaylistPicker = true })
             }
 
             // ── Repeat count ─────────────────────────────────────────────
             item {
                 RepeatCountRow(
-                    count = state.repeatCount,
-                    onCountChange = viewModel::onRepeatCountChange
+                    count = state.repeatCount, onCountChange = viewModel::onRepeatCountChange
                 )
             }
 
@@ -222,35 +213,36 @@ fun GenerateScreen(
             // ── Sekcja źródeł ────────────────────────────────────────────
             item {
                 SectionHeader(
-                    title  = "Źródła playlist",
-                    action = {
+                    title = "Źródła playlist", action = {
                         TextButton(onClick = viewModel::addSource) {
                             Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Dodaj źródło")
                         }
-                    }
-                )
+                    })
             }
 
             if (state.isLoadingPlaylists) {
                 item {
                     Box(
-                        Modifier.fillMaxWidth().height(80.dp),
-                        contentAlignment = Alignment.Center
+                        Modifier
+                            .fillMaxWidth()
+                            .height(80.dp), contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = SpotifyGreen, modifier = Modifier.size(32.dp))
+                        CircularProgressIndicator(
+                            color = SpotifyGreen, modifier = Modifier.size(32.dp)
+                        )
                     }
                 }
             } else {
                 itemsIndexed(state.sources, key = { _, s -> s.id }) { _, source ->
                     PlaylistSourceCard(
-                        source             = source,
+                        source = source,
                         availablePlaylists = state.availablePlaylists,
-                        onUpdate           = viewModel::updateSource,
-                        onRemove           = { viewModel.removeSource(source.id) },
-                        canRemove          = state.sources.size > 1,
-                        modifier           = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        onUpdate = viewModel::updateSource,
+                        onRemove = { viewModel.removeSource(source.id) },
+                        canRemove = state.sources.size > 1,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
                 }
             }
@@ -293,20 +285,18 @@ fun GenerateScreen(
                             TextButton(onClick = viewModel::clearSavedState) {
                                 Text("Wyczyść")
                             }
-                        }
-                    )
+                        })
                 }
 
                 itemsIndexed(tracks, key = { i, t -> "${i}_${t.id}" }) { index, track ->
                     PreviewTrackRow(
-                        track      = track,
-                        index      = index + 1,
-                        onRemove   = { viewModel.removeTrackFromPreview(index) },
-                        onMoveUp   = { if (index > 0) viewModel.moveTrack(index, index - 1) },
+                        track = track,
+                        index = index + 1,
+                        onRemove = { viewModel.removeTrackFromPreview(index) },
+                        onMoveUp = { if (index > 0) viewModel.moveTrack(index, index - 1) },
                         onMoveDown = {
                             if (index < tracks.lastIndex) viewModel.moveTrack(index, index + 1)
-                        }
-                    )
+                        })
                 }
             }
         }
@@ -315,13 +305,10 @@ fun GenerateScreen(
     // ── Dialogi ──────────────────────────────────────────────────────────
 
     if (showSaveTemplateDialog) {
-        SaveTemplateDialog(
-            onConfirm = { name ->
-                viewModel.saveAsTemplate(name)
-                showSaveTemplateDialog = false
-            },
-            onDismiss = { showSaveTemplateDialog = false }
-        )
+        SaveTemplateDialog(onConfirm = { name ->
+            viewModel.saveAsTemplate(name)
+            showSaveTemplateDialog = false
+        }, onDismiss = { showSaveTemplateDialog = false })
     }
 
     if (showTargetPlaylistPicker) {
@@ -331,8 +318,7 @@ fun GenerateScreen(
                 viewModel.setTargetPlaylist(playlist.id, playlist.name)
                 showTargetPlaylistPicker = false
             },
-            onDismiss = { showTargetPlaylistPicker = false }
-        )
+            onDismiss = { showTargetPlaylistPicker = false })
     }
 
     if (state.showQueueDryRun) {
@@ -351,8 +337,7 @@ fun GenerateScreen(
 
 @Composable
 private fun RepeatCountRow(
-    count: Int,
-    onCountChange: (Int) -> Unit
+    count: Int, onCountChange: (Int) -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -362,11 +347,15 @@ private fun RepeatCountRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("Powtórzenia szablonu",
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-            Text("Ile razy wykonać szablon (1–100)",
+            Text(
+                "Powtórzenia szablonu",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+            )
+            Text(
+                "Ile razy wykonać szablon (1–100)",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Row(
@@ -384,7 +373,9 @@ private fun RepeatCountRow(
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.width(48.dp).height(32.dp)
+                modifier = Modifier
+                    .width(48.dp)
+                    .height(32.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -426,16 +417,18 @@ private fun TargetActionsSection(
         )
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
+            horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()
         ) {
             FilterChip(
                 selected = TargetAction.NEW_PLAYLIST in selectedActions,
                 onClick = { onToggleAction(TargetAction.NEW_PLAYLIST) },
                 label = { Text("Nowa playlista") },
                 leadingIcon = {
-                    if (TargetAction.NEW_PLAYLIST in selectedActions)
-                        Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, Modifier.size(16.dp))
+                    if (TargetAction.NEW_PLAYLIST in selectedActions) Icon(
+                        Icons.AutoMirrored.Filled.PlaylistAdd,
+                        null,
+                        Modifier.size(16.dp)
+                    )
                 },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = SpotifyGreen.copy(alpha = 0.15f)
@@ -447,8 +440,11 @@ private fun TargetActionsSection(
                 onClick = { onToggleAction(TargetAction.EXISTING_PLAYLIST) },
                 label = { Text("Istniejąca") },
                 leadingIcon = {
-                    if (TargetAction.EXISTING_PLAYLIST in selectedActions)
-                        Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+                    if (TargetAction.EXISTING_PLAYLIST in selectedActions) Icon(
+                        Icons.Default.Add,
+                        null,
+                        Modifier.size(16.dp)
+                    )
                 },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = SpotifyGreen.copy(alpha = 0.15f)
@@ -460,8 +456,11 @@ private fun TargetActionsSection(
                 onClick = { onToggleAction(TargetAction.QUEUE) },
                 label = { Text("Kolejka") },
                 leadingIcon = {
-                    if (TargetAction.QUEUE in selectedActions)
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(16.dp))
+                    if (TargetAction.QUEUE in selectedActions) Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        null,
+                        Modifier.size(16.dp)
+                    )
                 },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = SpotifyGreen.copy(alpha = 0.15f)
@@ -494,8 +493,9 @@ private fun ExhaustionBar(status: ExhaustionStatus) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 2.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (status.exhausted)
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+            containerColor = if (status.exhausted) MaterialTheme.colorScheme.errorContainer.copy(
+                alpha = 0.5f
+            )
             else MaterialTheme.colorScheme.surfaceVariant
         ),
         shape = RoundedCornerShape(8.dp)
@@ -514,11 +514,10 @@ private fun ExhaustionBar(status: ExhaustionStatus) {
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    "${status.usedTracks}/${status.totalTracks}" +
-                            if (status.exhausted) " ✓" else "",
+                    "${status.usedTracks}/${status.totalTracks}" + if (status.exhausted) " ✓" else "",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (status.exhausted) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(Modifier.height(4.dp))
@@ -529,7 +528,7 @@ private fun ExhaustionBar(status: ExhaustionStatus) {
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = if (status.exhausted) MaterialTheme.colorScheme.error
-                        else SpotifyGreen,
+                else SpotifyGreen,
                 trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
             )
         }
@@ -542,10 +541,7 @@ private fun ExhaustionBar(status: ExhaustionStatus) {
 
 @Composable
 private fun ToggleRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -555,12 +551,16 @@ private fun ToggleRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium.copy(
-                fontWeight = FontWeight.Medium
-            ))
-            Text(subtitle,
+            Text(
+                title, style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Medium
+                )
+            )
+            Text(
+                subtitle,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Switch(
             checked = checked,
@@ -576,17 +576,14 @@ private fun ToggleRow(
 
 @Composable
 private fun PlaylistPickerDialog(
-    playlists: List<Playlist>,
-    onSelect: (Playlist) -> Unit,
-    onDismiss: () -> Unit
+    playlists: List<Playlist>, onSelect: (Playlist) -> Unit, onDismiss: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Wybierz playlistę docelową") },
         text = {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.height(400.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.height(400.dp)
             ) {
                 itemsIndexed(playlists) { _, playlist ->
                     Surface(
@@ -601,8 +598,12 @@ private fun PlaylistPickerDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null,
-                                Modifier.size(20.dp), tint = SpotifyGreen)
+                            Icon(
+                                Icons.AutoMirrored.Filled.PlaylistAdd,
+                                null,
+                                Modifier.size(20.dp),
+                                tint = SpotifyGreen
+                            )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     playlist.name,
@@ -624,8 +625,7 @@ private fun PlaylistPickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Anuluj") }
-        }
-    )
+        })
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -634,84 +634,80 @@ private fun PlaylistPickerDialog(
 
 @Composable
 private fun QueueDryRunDialog(
-    tracks: List<Track>,
-    isAdding: Boolean,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
+    tracks: List<Track>, isAdding: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = { if (!isAdding) onDismiss() },
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(24.dp), tint = SpotifyGreen)
-                Spacer(Modifier.width(8.dp))
-                Text("Dodaj do kolejki")
-            }
-        },
-        text = {
-            Column {
-                Text(
-                    "Dodać ${tracks.size} utworów do kolejki odtwarzania?",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Wymaga aktywnego odtwarzacza Spotify na dowolnym urządzeniu.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (isAdding) {
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = SpotifyGreen,
-                            strokeWidth = 2.dp
-                        )
-                        Text("Dodawanie...", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(modifier = Modifier.height(200.dp)) {
-                    val display = if (tracks.size > 10) tracks.take(10) else tracks
-                    itemsIndexed(display) { i, track ->
-                        Text(
-                            "${i + 1}. ${track.title} — ${track.artist}",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
-                    }
-                    if (tracks.size > 10) {
-                        item {
-                            Text(
-                                "… i ${tracks.size - 10} więcej",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                enabled = !isAdding,
-                colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
-            ) {
-                Text("Dodaj do kolejki")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isAdding) { Text("Anuluj") }
+    AlertDialog(onDismissRequest = { if (!isAdding) onDismiss() }, title = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.AutoMirrored.Filled.QueueMusic,
+                null,
+                Modifier.size(24.dp),
+                tint = SpotifyGreen
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Dodaj do kolejki")
         }
-    )
+    }, text = {
+        Column {
+            Text(
+                "Dodać ${tracks.size} utworów do kolejki odtwarzania?",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Wymaga aktywnego odtwarzacza Spotify na dowolnym urządzeniu.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (isAdding) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = SpotifyGreen,
+                        strokeWidth = 2.dp
+                    )
+                    Text("Dodawanie...", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            LazyColumn(modifier = Modifier.height(200.dp)) {
+                val display = if (tracks.size > 10) tracks.take(10) else tracks
+                itemsIndexed(display) { i, track ->
+                    Text(
+                        "${i + 1}. ${track.title} — ${track.artist}",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+                if (tracks.size > 10) {
+                    item {
+                        Text(
+                            "… i ${tracks.size - 10} więcej",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }, confirmButton = {
+        Button(
+            onClick = onConfirm,
+            enabled = !isAdding,
+            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
+        ) {
+            Text("Dodaj do kolejki")
+        }
+    }, dismissButton = {
+        TextButton(onClick = onDismiss, enabled = !isAdding) { Text("Anuluj") }
+    })
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -720,34 +716,26 @@ private fun QueueDryRunDialog(
 
 @Composable
 private fun SaveTemplateDialog(
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit
+    onConfirm: (String) -> Unit, onDismiss: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Zapisz szablon") },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Nazwa szablonu") },
-                placeholder = { Text("np. Salsa Night Set") },
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(name.trim()) },
-                enabled = name.isNotBlank()
-            ) { Text("Zapisz") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Anuluj") }
-        }
-    )
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Zapisz szablon") }, text = {
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Nazwa szablonu") },
+            placeholder = { Text("np. Salsa Night Set") },
+            singleLine = true,
+            shape = RoundedCornerShape(8.dp),
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
+        )
+    }, confirmButton = {
+        TextButton(
+            onClick = { onConfirm(name.trim()) }, enabled = name.isNotBlank()
+        ) { Text("Zapisz") }
+    }, dismissButton = {
+        TextButton(onClick = onDismiss) { Text("Anuluj") }
+    })
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -756,14 +744,13 @@ private fun SaveTemplateDialog(
 
 @Composable
 private fun SectionHeader(
-    title: String,
-    action: @Composable (() -> Unit)? = null
+    title: String, action: @Composable (() -> Unit)? = null
 ) {
     Row(
-        modifier              = Modifier
+        modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment     = Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
@@ -773,78 +760,114 @@ private fun SectionHeader(
 
 @Composable
 private fun PlaylistNameField(
-    name: String,
-    onChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    name: String, onChange: (String) -> Unit, modifier: Modifier = Modifier
 ) {
     OutlinedTextField(
-        value         = name,
+        value = name,
         onValueChange = onChange,
-        label         = { Text("Nazwa nowej playlisty") },
-        leadingIcon   = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
-        modifier      = modifier.fillMaxWidth(),
-        singleLine    = true,
-        shape         = RoundedCornerShape(12.dp),
-        colors        = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
+        label = { Text("Nazwa nowej playlisty") },
+        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = SpotifyGreen)
     )
 }
 
 @Composable
 private fun PreviewTrackRow(
-    track:      Track,
-    index:      Int,
-    onRemove:   () -> Unit,
-    onMoveUp:   () -> Unit,
-    onMoveDown: () -> Unit
+    track: Track, index: Int, onRemove: () -> Unit, onMoveUp: () -> Unit, onMoveDown: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment     = Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
             "$index",
-            style    = MaterialTheme.typography.bodySmall,
-            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(24.dp)
         )
+
+// Okładka albumu
+        if (track.albumArtUrl != null) {
+            AsyncImage(
+                model = track.albumArtUrl,
+                contentDescription = track.album,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.MusicNote,
+                    null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 track.title,
-                style    = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                "${track.artist} · ${track.formattedDuration()}",
-                style    = MaterialTheme.typography.bodySmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                "${track.artist} · ${track.album}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                track.formattedDuration(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Column {
             IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.KeyboardArrowUp, "W górę",
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    "W górę",
                     modifier = Modifier.size(18.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.KeyboardArrowDown, "W dół",
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    "W dół",
                     modifier = Modifier.size(18.dp),
-                    tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(Icons.Default.Close, "Usuń",
+            Icon(
+                Icons.Default.Close,
+                "Usuń",
                 modifier = Modifier.size(16.dp),
-                tint     = MaterialTheme.colorScheme.error)
+                tint = MaterialTheme.colorScheme.error
+            )
         }
     }
     HorizontalDivider(
-        color    = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
+        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
         modifier = Modifier.padding(start = 48.dp, end = 16.dp)
     )
 }
@@ -865,8 +888,7 @@ private fun GenerateBottomBar(
     val hasSavedUrl = state.savedPlaylistUrl != null
 
     Surface(
-        tonalElevation = 8.dp,
-        color          = MaterialTheme.colorScheme.surface
+        tonalElevation = 8.dp, color = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier
@@ -904,15 +926,15 @@ private fun GenerateBottomBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Button(
-                    onClick  = onGenerate,
-                    enabled  = !state.isGenerating && !state.isSaving,
+                    onClick = onGenerate,
+                    enabled = !state.isGenerating && !state.isSaving,
                     modifier = Modifier.weight(1f),
-                    colors   = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
+                    colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
                 ) {
                     if (state.isGenerating) {
                         CircularProgressIndicator(
-                            modifier    = Modifier.size(18.dp),
-                            color       = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
                             strokeWidth = 2.dp
                         )
                     } else {
@@ -928,8 +950,8 @@ private fun GenerateBottomBar(
 
                 if (state.isSessionActive) {
                     OutlinedButton(
-                        onClick  = onGenerateFromScratch,
-                        enabled  = !state.isGenerating && !state.isSaving
+                        onClick = onGenerateFromScratch,
+                        enabled = !state.isGenerating && !state.isSaving
                     ) {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
@@ -947,18 +969,20 @@ private fun GenerateBottomBar(
                 ) {
                     if (!hasSavedUrl) {
                         Button(
-                            onClick  = onSave,
-                            enabled  = !state.isGenerating && !state.isSaving,
+                            onClick = onSave,
+                            enabled = !state.isGenerating && !state.isSaving,
                             modifier = Modifier.weight(1f)
                         ) {
                             if (state.isSaving) {
                                 CircularProgressIndicator(
-                                    modifier    = Modifier.size(18.dp),
-                                    color       = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(18.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                Icon(Icons.Default.CloudUpload, null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.CloudUpload, null, modifier = Modifier.size(18.dp)
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Text("Zapisz")
                             }
@@ -967,11 +991,15 @@ private fun GenerateBottomBar(
 
                     if (hasSavedUrl) {
                         Button(
-                            onClick  = onOpenSpotify,
+                            onClick = onOpenSpotify,
                             modifier = Modifier.weight(1f),
-                            colors   = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
+                            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen)
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.AutoMirrored.Filled.OpenInNew,
+                                null,
+                                modifier = Modifier.size(18.dp)
+                            )
                             Spacer(Modifier.width(6.dp))
                             Text("Otwórz w Spotify")
                         }
