@@ -101,6 +101,42 @@ fun GenerateScreen(
     val templateCount by viewModel.templateCount.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    // Dialog przypinania utworów
+    val pinningState = state.pinningState
+    if (pinningState is PinningState.Picking) {
+        val pinSource = state.sources.find { it.id == pinningState.sourceId }
+        if (pinSource != null) {
+            PinTrackDialog(
+                tracks = pinningState.tracks,
+                currentPinned = pinSource.pinnedTracks,  // ← List<PinnedTrackInfo>
+                maxSelection = pinSource.trackCount,
+                onConfirm = { selectedIds ->
+                    viewModel.setPinnedTracks(pinningState.sourceId, selectedIds)
+                    viewModel.closePinningDialog()
+                },
+                onRefresh = { viewModel.refreshPinningTracks(pinningState.sourceId) },
+                onDismiss = viewModel::closePinningDialog
+            )
+        }
+    }
+    if (pinningState is PinningState.Loading) {
+        AlertDialog(
+            onDismissRequest = viewModel::closePinningDialog,
+            title = { Text("Ładowanie utworów…") },
+            text = {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = SpotifyGreen)
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = viewModel::closePinningDialog) {
+                    Text("Anuluj")
+                }
+            }
+        )
+    }
+
     var showSaveTemplateDialog by remember { mutableStateOf(false) }
     var showTargetPlaylistPicker by remember { mutableStateOf(false) }
 
@@ -242,6 +278,10 @@ fun GenerateScreen(
                         onUpdate = viewModel::updateSource,
                         onRemove = { viewModel.removeSource(source.id) },
                         canRemove = state.sources.size > 1,
+                        onPinTracks = { viewModel.openPinningDialog(source.id) },
+                        onRemovePinnedTrack = { trackId ->
+                            viewModel.removePinnedTrack(source.id, trackId)
+                        },
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
                 }

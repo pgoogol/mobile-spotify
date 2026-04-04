@@ -2,13 +2,27 @@ package com.spotify.playlistmanager.ui.screens.generate
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.spotify.playlistmanager.data.model.*
-import com.spotify.playlistmanager.domain.model.*
+import com.spotify.playlistmanager.data.model.PinnedTrackInfo
+import com.spotify.playlistmanager.data.model.Playlist
+import com.spotify.playlistmanager.data.model.PlaylistSource
+import com.spotify.playlistmanager.data.model.Track
+import com.spotify.playlistmanager.domain.model.EnergyCurve
+import com.spotify.playlistmanager.domain.model.ExhaustionStatus
+import com.spotify.playlistmanager.domain.model.GenerateResult
+import com.spotify.playlistmanager.domain.model.GenerationRound
+import com.spotify.playlistmanager.domain.model.GeneratorTemplate
+import com.spotify.playlistmanager.domain.model.TargetAction
+import com.spotify.playlistmanager.domain.model.TemplateSource
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -58,8 +72,23 @@ data class GenerateUiState(
     val isAddingToQueue: Boolean = false,
 
     /** Postęp generowania w pętli repeat (0..repeatCount). */
-    val repeatProgress: Int = 0
+    val repeatProgress: Int = 0,
+
+    /** Stan dialogu przypinania utworów. */
+    val pinningState: PinningState = PinningState.Idle
 )
+
+/**
+ * Stan dialogu przypinania utworów.
+ */
+sealed class PinningState {
+    data object Idle : PinningState()
+    data class Loading(val sourceId: String) : PinningState()
+    data class Picking(
+        val sourceId: String,
+        val tracks: List<Track>
+    ) : PinningState()
+}
 
 @HiltViewModel
 class GenerateViewModel @Inject constructor(
@@ -68,6 +97,8 @@ class GenerateViewModel @Inject constructor(
     private val templateRepository: IGeneratorTemplateRepository
 ) : ViewModel() {
 
+    /** Cache tracków per playlista — lazy loading, resetowany z sesją. */
+    private val tracksCache: MutableMap<String, List<Track>> = mutableMapOf()
     private val _state = MutableStateFlow(GenerateUiState())
     val state: StateFlow<GenerateUiState> = _state.asStateFlow()
 
@@ -177,7 +208,103 @@ class GenerateViewModel @Inject constructor(
 
     fun updateSource(updated: PlaylistSource) {
         _state.update { s ->
-            s.copy(sources = s.sources.map { if (it.id == updated.id) updated else it })
+            s.copy(sources = s.sources.map { src ->
+                if (src.id == updated.id) {
+                    val clampedPinned = if (updated.pinnedTracks.size > updated.trackCount)
+                        updated.pinnedTracks.take(updated.trackCount)
+                    else updated.pinnedTracks
+
+                    val finalPinned = if (src.playlist?.id != updated.playlist?.id)
+                        emptyList()
+                    else clampedPinned
+
+                    updated.copy(pinnedTracks = finalPinned)
+                } else src
+            })
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Pinned Tracks
+    // ══════════════════════════════════════════════════════════════════════
+
+    fun openPinningDialog(sourceId: String) {
+        val source = _state.value.sources.find { it.id == sourceId } ?: return
+        val playlistId = source.playlist?.id ?: return
+
+        val cached = tracksCache[playlistId]
+        if (cached != null) {
+            _state.update {
+                it.copy(pinningState = PinningState.Picking(sourceId, cached))
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _state.update { it.copy(pinningState = PinningState.Loading(sourceId)) }
+            runCatching {
+                if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
+                    repository.getLikedTracks()
+                else
+                    repository.getPlaylistTracks(playlistId)
+            }.onSuccess { tracks ->
+                tracksCache[playlistId] = tracks
+                _state.update {
+                    it.copy(pinningState = PinningState.Picking(sourceId, tracks))
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        pinningState = PinningState.Idle,
+                        error = "Nie udało się pobrać utworów: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun refreshPinningTracks(sourceId: String) {
+        val source = _state.value.sources.find { it.id == sourceId } ?: return
+        val playlistId = source.playlist?.id ?: return
+        tracksCache.remove(playlistId)
+        openPinningDialog(sourceId)
+    }
+
+    fun closePinningDialog() {
+        _state.update { it.copy(pinningState = PinningState.Idle) }
+    }
+
+    fun setPinnedTracks(sourceId: String, trackIds: List<String>) {
+        val pinningState = _state.value.pinningState
+        // Pobierz pełne dane z listy tracków w dialogu
+        val tracksList = (pinningState as? PinningState.Picking)?.tracks ?: emptyList()
+        val tracksById = tracksList.associateBy { it.id }
+
+        _state.update { s ->
+            s.copy(sources = s.sources.map { src ->
+                if (src.id == sourceId) {
+                    val clamped = trackIds.take(src.trackCount)
+                    val pinnedInfos = clamped.mapNotNull { id ->
+                        val track = tracksById[id] ?: return@mapNotNull null
+                        PinnedTrackInfo(
+                            id = id,
+                            title = track.title,
+                            artist = track.artist
+                        )
+                    }
+                    src.copy(pinnedTracks = pinnedInfos)
+                } else src
+            })
+        }
+    }
+
+    fun removePinnedTrack(sourceId: String, trackId: String) {
+        _state.update { s ->
+            s.copy(sources = s.sources.map { src ->
+                if (src.id == sourceId)
+                    src.copy(pinnedTracks = src.pinnedTracks.filter { it.id != trackId })
+                else src
+            })
         }
     }
 
@@ -186,7 +313,7 @@ class GenerateViewModel @Inject constructor(
     // ══════════════════════════════════════════════════════════════════════
 
     /**
-     * Generuje podgląd — wykonuje szablon [repeatCount] razy.
+     * Generuje podgląd — wykonuje szablon repeatCount razy.
      *
      * Każda iteracja:
      *  1. Wywołuje use-case z bieżącą exclusion listą
@@ -206,8 +333,10 @@ class GenerateViewModel @Inject constructor(
             val curve = src.energyCurve
             if (curve is EnergyCurve.Wave && src.trackCount < curve.tracksPerHalfWave) {
                 _state.update {
-                    it.copy(error = "Zbyt mało utworów dla fali w ${src.playlist?.name}: " +
-                            "min. ${curve.tracksPerHalfWave}, ustawiono ${src.trackCount}")
+                    it.copy(
+                        error = "Zbyt mało utworów dla fali w ${src.playlist?.name}: " +
+                                "min. ${curve.tracksPerHalfWave}, ustawiono ${src.trackCount}"
+                    )
                 }
                 return
             }
@@ -303,7 +432,10 @@ class GenerateViewModel @Inject constructor(
                     newRounds.add(round)
                 }
             }
-
+            // Wyczyść pinned tracks po wygenerowaniu (jednorazowe)
+            _state.update { st ->
+                st.copy(sources = st.sources.map { it.copy(pinnedTracks = emptyList()) })
+            }
             // Kumuluj podgląd: istniejące + nowe
             val cumulativePreview = (currentState.previewTracks ?: emptyList()) + allNewTracks
 
@@ -328,8 +460,10 @@ class GenerateViewModel @Inject constructor(
                 }
             } else if (exhausted) {
                 _state.update {
-                    it.copy(error = "Playlisty wyczerpane po $completedRounds z $repeatCount powtórzeń. " +
-                            "Wygenerowano ${allNewTracks.size} utworów.")
+                    it.copy(
+                        error = "Playlisty wyczerpane po $completedRounds z $repeatCount powtórzeń. " +
+                                "Wygenerowano ${allNewTracks.size} utworów."
+                    )
                 }
             }
         }
@@ -535,10 +669,11 @@ class GenerateViewModel @Inject constructor(
                 }.onFailure { e ->
                     val errorMsg = when {
                         e.message?.contains("404") == true ||
-                        e.message?.contains("No active device") == true ->
+                                e.message?.contains("No active device") == true ->
                             "Brak aktywnego odtwarzacza Spotify. " +
                                     "Włącz odtwarzanie na dowolnym urządzeniu i spróbuj ponownie. " +
                                     "Dodano $addedCount z ${uris.size} utworów."
+
                         else ->
                             "Błąd dodawania do kolejki: ${e.message}. " +
                                     "Dodano $addedCount z ${uris.size} utworów."
@@ -581,9 +716,11 @@ class GenerateViewModel @Inject constructor(
                 generateResult = null,
                 isSessionActive = false,
                 savedPlaylistUrl = null,
-                showQueueDryRun = false
+                showQueueDryRun = false,
+                pinningState = PinningState.Idle  // ← NOWE
             )
         }
+        tracksCache.clear()  // ← NOWE
     }
 
     fun clearError() {
@@ -604,18 +741,18 @@ class GenerateViewModel @Inject constructor(
             runCatching {
                 templateRepository.save(
                     GeneratorTemplate(
-                    name = name,
-                    sources = sources.mapIndexed { idx, src ->
-                        TemplateSource(
-                            position = idx,
-                            playlistId = src.playlist!!.id,
-                            playlistName = src.playlist!!.name,
-                            trackCount = src.trackCount,
-                            sortBy = src.sortBy,
-                            energyCurve = src.energyCurve
-                        )
-                    }
-                ))
+                        name = name,
+                        sources = sources.mapIndexed { idx, src ->
+                            TemplateSource(
+                                position = idx,
+                                playlistId = src.playlist!!.id,
+                                playlistName = src.playlist!!.name,
+                                trackCount = src.trackCount,
+                                sortBy = src.sortBy,
+                                energyCurve = src.energyCurve
+                            )
+                        }
+                    ))
             }.onFailure { e ->
                 _state.update { it.copy(error = "Błąd zapisu szablonu: ${e.message}") }
             }

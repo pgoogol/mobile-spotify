@@ -47,6 +47,7 @@ object EnergyCurveCalculator {
         tracks: List<Track>,
         featuresMap: Map<String, TrackAudioFeatures>,
         curve: EnergyCurve,
+        pinnedTrackIds: List<String> = emptyList(),
         trackCount: Int,
         tolerance: Float = DEFAULT_TOLERANCE,
         smoothJoin: Boolean = true,
@@ -54,9 +55,15 @@ object EnergyCurveCalculator {
     ): SegmentMatchResult {
         val targets = curve.generateTargets(trackCount)
 
+        // Rozdziel pulę na pinned i non-pinned
+        val pinnedSet = pinnedTrackIds.toSet()
+        val pinnedTracks = tracks.filter { it.id in pinnedSet }
+        val nonPinnedTracks = tracks.filter { it.id !in pinnedSet }
+
         if (targets.isEmpty()) {
-            // Krzywa None — zwróć utwory bez dopasowania
-            val taken = tracks.take(trackCount)
+            // Krzywa None — pinned na początku, reszta dopełniona
+            val remaining = trackCount - pinnedTracks.size
+            val taken = pinnedTracks + nonPinnedTracks.take(remaining.coerceAtLeast(0))
             return SegmentMatchResult(
                 tracks = taken.map { track ->
                     val score = featuresMap[track.id]
@@ -70,39 +77,90 @@ object EnergyCurveCalculator {
             )
         }
 
-        // Oblicz composite scores i posortuj
-        val scoredPool = tracks.map { track ->
+        // ── Faza 1: Przypisz pinned tracks do optymalnych pozycji ────
+        val scoredPinned = pinnedTracks.map { track ->
+            val score = featuresMap[track.id]
+                ?.let { CompositeScoreCalculator.calculate(it) }
+                ?: CompositeScoreCalculator.DEFAULT_SCORE
+            ScoredTrack(track, score)
+        }
+
+        // Modyfikuj targets z smooth join
+        val effectiveTargets = applySmoothJoin(targets, smoothJoin, prevLastScore)
+
+        // Greedy: przypisz pinned track do pozycji z najmniejszą |score - target|
+        data class PinnedCandidate(
+            val track: ScoredTrack,
+            val position: Int,
+            val distance: Float
+        )
+
+        val allCandidates = scoredPinned.flatMap { pinned ->
+            effectiveTargets.indices.map { pos ->
+                PinnedCandidate(
+                    pinned, pos,
+                    abs(pinned.score - effectiveTargets[pos])
+                )
+            }
+        }.sortedBy { it.distance }
+
+        val pinnedAssignments = mutableMapOf<Int, ScoredTrack>()
+        val assignedPositions = mutableSetOf<Int>()
+        val assignedTracks = mutableSetOf<String>()
+
+        for (candidate in allCandidates) {
+            val trackId = candidate.track.track.id ?: continue
+            if (trackId in assignedTracks) continue
+            if (candidate.position in assignedPositions) continue
+            pinnedAssignments[candidate.position] = candidate.track
+            assignedPositions.add(candidate.position)
+            assignedTracks.add(trackId)
+            if (pinnedAssignments.size == scoredPinned.size) break
+        }
+
+        // ── Faza 2: Wypełnij wolne sloty z puli (bez pinned) ─────────
+        val scoredPool = nonPinnedTracks.map { track ->
             val score = featuresMap[track.id]
                 ?.let { CompositeScoreCalculator.calculate(it) }
                 ?: CompositeScoreCalculator.DEFAULT_SCORE
             ScoredTrack(track, score)
         }.sortedBy { it.score }
 
-        // Mutable list do usuwania wybranych
         val available = scoredPool.toMutableList()
-
-        // Modyfikuj targets z smooth join
-        val effectiveTargets = applySmoothJoin(targets, smoothJoin, prevLastScore)
-
         val matched = mutableListOf<MatchedTrack>()
 
         for ((idx, target) in effectiveTargets.withIndex()) {
-            if (available.isEmpty()) break
+            val pinned = pinnedAssignments[idx]
+            if (pinned != null) {
+                matched.add(
+                    MatchedTrack(
+                        track = pinned.track,
+                        compositeScore = pinned.score,
+                        targetScore = targets[idx]  // oryginalne targety do wykresu
+                    )
+                )
+                continue
+            }
 
+            if (available.isEmpty()) break
             val selected = findBestMatch(available, target, tolerance)
             available.remove(selected)
 
-            matched.add(MatchedTrack(
-                track = selected.track,
-                compositeScore = selected.score,
-                targetScore = targets[idx] // oryginalne targety do wykresu
-            ))
+            matched.add(
+                MatchedTrack(
+                    track = selected.track,
+                    compositeScore = selected.score,
+                    targetScore = targets[idx]
+                )
+            )
         }
 
         // Procent dopasowania
         val matchPercentage = if (matched.isEmpty()) 1f
         else {
-            val avgDeviation = matched.map { abs(it.compositeScore - it.targetScore) }.average().toFloat()
+            val avgDeviation = matched.map {
+                abs(it.compositeScore - it.targetScore)
+            }.average().toFloat()
             (1f - avgDeviation).coerceIn(0f, 1f)
         }
 

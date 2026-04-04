@@ -170,13 +170,22 @@ data class TopArtist(
 //  Modele generatora playlist
 // ════════════════════════════════════════════════════════════
 
+/**
+ * Informacje o przypiętym utworze — do wyświetlania w UI bez dodatkowego fetcha.
+ */
+data class PinnedTrackInfo(
+    val id: String,
+    val title: String,
+    val artist: String
+)
+
 data class PlaylistSource(
-    // kotlin.random.Random zamiast java.util.UUID — KMP-safe, zero zależności JVM
     val id: String = randomId(),
     val playlist: Playlist? = null,
     val trackCount: Int = 10,
     val sortBy: SortOption = SortOption.NONE,
-    val energyCurve: EnergyCurve = EnergyCurve.None
+    val energyCurve: EnergyCurve = EnergyCurve.None,
+    val pinnedTracks: List<PinnedTrackInfo> = emptyList()
 )
 
 /**

@@ -2,23 +2,51 @@ package com.spotify.playlistmanager.ui.screens.generate
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
 import com.spotify.playlistmanager.data.model.SortOption
@@ -44,6 +72,8 @@ fun PlaylistSourceCard(
     onUpdate: (PlaylistSource) -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
+    onPinTracks: () -> Unit,
+    onRemovePinnedTrack: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var playlistExpanded by remember { mutableStateOf(false) }
@@ -207,6 +237,74 @@ fun PlaylistSourceCard(
                             )
                         }
                     }
+                }
+            }
+            // ── Pinned Tracks ───────────────────────────────────────────
+            AnimatedVisibility(visible = source.playlist != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        TextButton(
+                            onClick = onPinTracks,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Icon(Icons.Default.PushPin, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Przypnij utwory")
+                        }
+                        if (source.pinnedTracks.isNotEmpty()) {
+                            Text(
+                                "(${source.pinnedTracks.size}/${source.trackCount})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SpotifyGreen
+                            )
+                        }
+                    }
+
+                    if (source.pinnedTracks.isNotEmpty()) {
+                        PinnedTrackChips(
+                            pinnedTracks = source.pinnedTracks,
+                            onRemove = onRemovePinnedTrack
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PinnedTrackChips(
+    pinnedTracks: List<PinnedTrackInfo>,
+    onRemove: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        pinnedTracks.chunked(2).forEach { row ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                row.forEach { pinned ->
+                    AssistChip(
+                        onClick = { onRemove(pinned.id) },
+                        label = {
+                            Text(
+                                "📌 ${pinned.title} — ${pinned.artist}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Default.Close, "Usuń",
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                 }
             }
         }

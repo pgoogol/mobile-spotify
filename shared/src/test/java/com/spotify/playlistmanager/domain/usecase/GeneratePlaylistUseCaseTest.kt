@@ -378,4 +378,74 @@ class GeneratePlaylistUseCaseTest {
         assertEquals(0, statuses[0].remainingTracks)
         assertEquals(1f, statuses[0].usagePercent, 0.001f)
     }
+
+    @Test
+    fun `generateWithCurves includes pinned tracks in result`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.SalsaRomantica,
+            pinnedTracks = listOf(
+                PinnedTrackInfo("t1", "Track A", "Artysta"),
+                PinnedTrackInfo("t4", "Track D", "Artysta")
+            )
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertTrue("t1" in resultIds)
+        assertTrue("t4" in resultIds)
+        assertEquals(3, result.generateResult.tracks.size)
+    }
+
+    @Test
+    fun `generateWithCurves pinned tracks ignore excludeTrackIds`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.SalsaRomantica,
+            pinnedTracks = listOf(
+                PinnedTrackInfo("t1", "Track A", "Artysta")
+            )
+        )
+        val result = useCase.generateWithCurves(
+            listOf(source),
+            excludeTrackIds = setOf("t1", "t2")
+        )
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertTrue("t1" in resultIds)
+        assertFalse("t2" in resultIds)
+    }
+
+    @Test
+    fun `generateWithCurves pinned with None curve`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 4,
+            energyCurve = EnergyCurve.None,
+            sortBy = SortOption.POPULARITY,
+            pinnedTracks = listOf(
+                PinnedTrackInfo("t4", "Track D", "Artysta")
+            )
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertTrue("t4" in resultIds)
+        assertEquals(4, result.generateResult.tracks.size)
+    }
+
+    @Test
+    fun `generateWithCurves pinned tracks dont cause duplicates`() = runTest {
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 5,
+            energyCurve = EnergyCurve.SalsaClasica,
+            pinnedTracks = listOf(
+                PinnedTrackInfo("t1", "Track A", "Artysta"),
+                PinnedTrackInfo("t3", "Track C", "Artysta")
+            )
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        val ids = result.generateResult.tracks.map { it.id }
+        assertEquals("No duplicates", ids.size, ids.toSet().size)
+    }
 }

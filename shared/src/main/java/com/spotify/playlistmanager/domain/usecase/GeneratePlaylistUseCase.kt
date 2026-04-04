@@ -1,7 +1,16 @@
 package com.spotify.playlistmanager.domain.usecase
 
-import com.spotify.playlistmanager.data.model.*
-import com.spotify.playlistmanager.domain.model.*
+import com.spotify.playlistmanager.data.model.PlaylistSource
+import com.spotify.playlistmanager.data.model.SortOption
+import com.spotify.playlistmanager.data.model.Track
+import com.spotify.playlistmanager.data.model.TrackAudioFeatures
+import com.spotify.playlistmanager.domain.model.CompositeScoreCalculator
+import com.spotify.playlistmanager.domain.model.EnergyCurve
+import com.spotify.playlistmanager.domain.model.EnergyCurveCalculator
+import com.spotify.playlistmanager.domain.model.ExhaustionStatus
+import com.spotify.playlistmanager.domain.model.GenerateResult
+import com.spotify.playlistmanager.domain.model.MatchedTrack
+import com.spotify.playlistmanager.domain.model.SegmentMatchResult
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import javax.inject.Inject
@@ -68,29 +77,44 @@ class GeneratePlaylistUseCase @Inject constructor(
             val playlistName = source.playlist?.name ?: "?"
 
             val allPlaylistTracks = fetchTracks(playlistId)
-            val available = allPlaylistTracks.filter { it.id !in runningExclude }
+            // Pinned tracks ignorują excludeTrackIds (deduplikacja sesyjna)
+            val pinnedIds = source.pinnedTracks.map { it.id }.toSet()
+            val pinnedTracks = allPlaylistTracks.filter { it.id in pinnedIds }
+            val nonPinnedAvailable = allPlaylistTracks.filter {
+                it.id !in runningExclude && it.id !in pinnedIds
+            }
+            // Połącz: pinned (zawsze) + non-pinned (po filtrze exclude)
+            val available = pinnedTracks + nonPinnedAvailable
 
             // Status wyczerpania dla tej playlisty
+            val excludedNonPinned = allPlaylistTracks.count {
+                it.id in runningExclude && it.id !in pinnedIds
+            }
             val status = ExhaustionStatus(
                 playlistId = playlistId,
                 playlistName = playlistName,
                 totalTracks = allPlaylistTracks.size,
-                usedTracks = allPlaylistTracks.size - available.size
+                usedTracks = excludedNonPinned  // ← pinned NIE liczą się jako "used"
             )
 
             // Sprawdź czy playlista ma wystarczająco utworów
             if (available.isEmpty()) {
-                exhaustedPlaylists.add(status.copy(
-                    usedTracks = allPlaylistTracks.size
-                ))
-                exhaustionStatuses.add(status.copy(
-                    usedTracks = allPlaylistTracks.size
-                ))
+                exhaustedPlaylists.add(
+                    status.copy(
+                        usedTracks = allPlaylistTracks.size
+                    )
+                )
+                exhaustionStatuses.add(
+                    status.copy(
+                        usedTracks = allPlaylistTracks.size
+                    )
+                )
                 continue
             }
 
             if (source.energyCurve is EnergyCurve.None) {
-                val sorted = applySorting(available, source.sortBy)
+                // Pinned na początku, reszta sortowana
+                val sorted = pinnedTracks + applySorting(nonPinnedAvailable, source.sortBy)
                 val taken = sorted.take(source.trackCount)
                 allTracks.addAll(taken)
 
@@ -106,17 +130,19 @@ class GeneratePlaylistUseCase @Inject constructor(
                         ?: CompositeScoreCalculator.DEFAULT_SCORE
                     MatchedTrack(track, score, 0f)
                 }
-                allSegments.add(SegmentMatchResult(
-                    tracks = matchedTracks,
-                    targetScores = emptyList(),
-                    matchPercentage = 1f,
-                    lastScore = matchedTracks.lastOrNull()?.compositeScore ?: 0f
-                ))
+                allSegments.add(
+                    SegmentMatchResult(
+                        tracks = matchedTracks,
+                        targetScores = emptyList(),
+                        matchPercentage = 1f,
+                        lastScore = matchedTracks.lastOrNull()?.compositeScore ?: 0f
+                    )
+                )
                 prevLastScore = allSegments.last().lastScore
 
                 // Zaktualizuj status po pobraniu
                 val updatedStatus = status.copy(
-                    usedTracks = allPlaylistTracks.size - available.size + taken.size
+                    usedTracks = excludedNonPinned + taken.count { it.id !in pinnedIds }
                 )
                 exhaustionStatuses.add(updatedStatus)
                 if (updatedStatus.exhausted) exhaustedPlaylists.add(updatedStatus)
@@ -127,6 +153,7 @@ class GeneratePlaylistUseCase @Inject constructor(
                     tracks = available,
                     featuresMap = featuresMap,
                     curve = source.energyCurve,
+                    pinnedTrackIds = source.pinnedTracks.map { it.id },
                     trackCount = source.trackCount,
                     smoothJoin = smoothJoin,
                     prevLastScore = prevLastScore
@@ -144,7 +171,7 @@ class GeneratePlaylistUseCase @Inject constructor(
                 prevLastScore = result.lastScore
 
                 val updatedStatus = status.copy(
-                    usedTracks = allPlaylistTracks.size - available.size + matchedTrackObjects.size
+                    usedTracks = excludedNonPinned + matchedTrackObjects.count { it.id !in pinnedIds }
                 )
                 exhaustionStatuses.add(updatedStatus)
                 if (updatedStatus.exhausted) exhaustedPlaylists.add(updatedStatus)
@@ -233,10 +260,10 @@ class GeneratePlaylistUseCase @Inject constructor(
 
     private fun applySorting(tracks: List<Track>, option: SortOption): List<Track> =
         when (option) {
-            SortOption.POPULARITY   -> tracks.sortedByDescending { it.popularity }
-            SortOption.DURATION     -> tracks.sortedBy { it.durationMs }
+            SortOption.POPULARITY -> tracks.sortedByDescending { it.popularity }
+            SortOption.DURATION -> tracks.sortedBy { it.durationMs }
             SortOption.RELEASE_DATE -> tracks.sortedByDescending { it.album }
-            SortOption.NONE         -> tracks
+            SortOption.NONE -> tracks
         }
 
     companion object {

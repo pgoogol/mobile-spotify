@@ -2,7 +2,8 @@ package com.spotify.playlistmanager.domain.model
 
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.data.model.TrackAudioFeatures
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EnergyCurveCalculatorTest {
@@ -42,7 +43,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `matchTracks returns correct number of tracks`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, 8
+            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, emptyList(), 8
         )
         assertEquals(8, result.tracks.size)
         assertEquals(8, result.targetScores.size)
@@ -51,7 +52,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `matchTracks returns no duplicates`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaRapida, 15
+            testPool, testFeaturesMap, EnergyCurve.SalsaRapida, emptyList(), 15
         )
         val ids = result.tracks.map { it.track.id }
         assertEquals(ids.size, ids.toSet().size)
@@ -60,7 +61,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `matchTracks handles empty pool`() {
         val result = EnergyCurveCalculator.matchTracks(
-            emptyList(), emptyMap(), EnergyCurve.SalsaRomantica, 5
+            emptyList(), emptyMap(), EnergyCurve.SalsaRomantica, emptyList(), 5
         )
         assertTrue(result.tracks.isEmpty())
     }
@@ -68,7 +69,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `matchTracks handles pool smaller than trackCount`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool.take(3), testFeaturesMap, EnergyCurve.SalsaRomantica, 10
+            testPool.take(3), testFeaturesMap, EnergyCurve.SalsaRomantica, emptyList(), 10
         )
         assertEquals(3, result.tracks.size)
     }
@@ -76,7 +77,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `match percentage is between 0 and 1`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaClasica, 10
+            testPool, testFeaturesMap, EnergyCurve.SalsaClasica, emptyList(), 10
         )
         assertTrue(result.matchPercentage in 0f..1f)
     }
@@ -84,7 +85,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `SalsaRomantica matching follows ascending trend`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, 10
+            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, emptyList(), 10
         )
         val scores = result.tracks.map { it.compositeScore }
         assertTrue("Ascending curve should have positive trend", scores.last() - scores.first() > 0)
@@ -93,7 +94,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `None curve returns tracks without matching`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.None, 5
+            testPool, testFeaturesMap, EnergyCurve.None, emptyList(), 5
         )
         assertEquals(5, result.tracks.size)
         assertTrue(result.targetScores.isEmpty())
@@ -103,7 +104,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `tracks without features get score 0`() {
         val result = EnergyCurveCalculator.matchTracks(
-            listOf(makeTrack("no-features")), emptyMap(), EnergyCurve.SalsaRomantica, 1
+            listOf(makeTrack("no-features")), emptyMap(), EnergyCurve.SalsaRomantica, emptyList(), 1
         )
         assertEquals(0f, result.tracks[0].compositeScore, 0.001f)
     }
@@ -111,11 +112,11 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `smooth join with null prevLastScore has no effect`() {
         val r1 = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, 5,
+            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, emptyList(), 5,
             smoothJoin = true, prevLastScore = null
         )
         val r2 = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, 5,
+            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica, emptyList(), 5,
             smoothJoin = false, prevLastScore = null
         )
         assertEquals(r1.targetScores, r2.targetScores)
@@ -124,8 +125,54 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `lastScore equals last matched track composite score`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.SalsaRapida, 5
+            testPool, testFeaturesMap, EnergyCurve.SalsaRapida, emptyList(), 5
         )
         assertEquals(result.tracks.last().compositeScore, result.lastScore, 0.001f)
+    }
+
+    @Test
+    fun `matchTracks with pinned tracks includes all pinned`() {
+        val pinned = listOf("t1", "t4")
+        val result = EnergyCurveCalculator.matchTracks(
+            testPool, testFeaturesMap, EnergyCurve.SalsaRomantica,
+            pinnedTrackIds = pinned, trackCount = 5
+        )
+        val resultIds = result.tracks.map { it.track.id }
+        assertTrue("t1" in resultIds)
+        assertTrue("t4" in resultIds)
+        assertEquals(5, result.tracks.size)
+    }
+
+    @Test
+    fun `matchTracks pinned tracks dont duplicate`() {
+        val pinned = listOf("t1", "t2")
+        val result = EnergyCurveCalculator.matchTracks(
+            testPool, testFeaturesMap, EnergyCurve.SalsaClasica,
+            pinnedTrackIds = pinned, trackCount = 5
+        )
+        val ids = result.tracks.map { it.track.id }
+        assertEquals(ids.size, ids.toSet().size)
+    }
+
+    @Test
+    fun `matchTracks all pinned fills entire segment`() {
+        val allIds = testPool.mapNotNull { it.id }
+        val result = EnergyCurveCalculator.matchTracks(
+            testPool, testFeaturesMap, EnergyCurve.SalsaRapida,
+            pinnedTrackIds = allIds, trackCount = allIds.size
+        )
+        assertEquals(allIds.size, result.tracks.size)
+        assertEquals(allIds.toSet(), result.tracks.map { it.track.id }.toSet())
+    }
+
+    @Test
+    fun `matchTracks with None curve pinned first`() {
+        val pinned = listOf("t3")
+        val result = EnergyCurveCalculator.matchTracks(
+            testPool, testFeaturesMap, EnergyCurve.None,
+            pinnedTrackIds = pinned, trackCount = 3
+        )
+        assertEquals("t3", result.tracks[0].track.id)
+        assertEquals(3, result.tracks.size)
     }
 }
