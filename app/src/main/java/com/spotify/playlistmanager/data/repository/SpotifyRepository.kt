@@ -164,7 +164,8 @@ private fun SpotifyPlaylist.toDomain() = Playlist(
     description = description,
     imageUrl = images.firstOrNull()?.url,
     trackCount = tracks.total,
-    ownerId = owner.id
+    ownerId = owner.id,
+    snapshotId = snapshot_id
 )
 
 private fun SpotifyTrack.toDomain() = Track(

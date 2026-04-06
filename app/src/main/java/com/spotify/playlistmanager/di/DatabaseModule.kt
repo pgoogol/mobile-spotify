@@ -3,6 +3,7 @@ package com.spotify.playlistmanager.di
 import android.content.Context
 import androidx.room.Room
 import com.spotify.playlistmanager.data.cache.GeneratorTemplateDao
+import com.spotify.playlistmanager.data.cache.PlaylistCacheDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDatabase
 import com.spotify.playlistmanager.data.repository.GeneratorTemplateRepository
@@ -25,7 +26,10 @@ object DatabaseModule {
     @Singleton
     fun provideTrackFeaturesDatabase(@ApplicationContext ctx: Context): TrackFeaturesDatabase =
         Room.databaseBuilder(ctx, TrackFeaturesDatabase::class.java, "track_features.db")
-            .addMigrations(TrackFeaturesDatabase.MIGRATION_1_2)
+            .addMigrations(
+                TrackFeaturesDatabase.MIGRATION_1_2,
+                TrackFeaturesDatabase.MIGRATION_2_3
+            )
             .build()
 
     @Provides
@@ -37,6 +41,11 @@ object DatabaseModule {
     @Singleton
     fun provideGeneratorTemplateDao(db: TrackFeaturesDatabase): GeneratorTemplateDao =
         db.generatorTemplateDao()
+
+    @Provides
+    @Singleton
+    fun providePlaylistCacheDao(db: TrackFeaturesDatabase): PlaylistCacheDao =
+        db.playlistCacheDao()
 }
 
 @Module

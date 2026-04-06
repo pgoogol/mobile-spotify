@@ -21,12 +21,27 @@ data class SpotifyPlaylist(
     val images: List<SpotifyImage>,
     val tracks: TracksRef,
     val owner: SpotifyOwner,
-    val public: Boolean?
+    val public: Boolean?,
+    /**
+     * Identyfikator stanu playlisty — zmienia się gdy ktoś edytuje
+     * (dodaje/usuwa/zmienia kolejność utworów). Używany do walidacji
+     * cache bez pełnego refetcha utworów.
+     * Null dla Liked Songs (nie mają snapshot_id).
+     */
+    val snapshot_id: String? = null
 )
 
 data class SpotifyOwner(val id: String, val display_name: String?)
 data class SpotifyImage(val url: String, val height: Int?, val width: Int?)
 data class TracksRef(val href: String, val total: Int)
+
+/**
+ * Tania odpowiedź dla walidacji cache — tylko snapshot_id.
+ * Używana przez GET /v1/playlists/{id}?fields=snapshot_id.
+ */
+data class PlaylistSnapshotResponse(
+    val snapshot_id: String?
+)
 
 data class PlaylistTracksResponse(
     val items: List<PlaylistTrackItem>,
@@ -132,7 +147,12 @@ data class Playlist(
     val description: String?,
     val imageUrl: String?,
     val trackCount: Int,
-    val ownerId: String
+    val ownerId: String,
+    /**
+     * Snapshot ID z Spotify API — zmienia się przy edycji playlisty.
+     * Nullable dla kompatybilności (Liked Songs, ręcznie tworzone Playlist w UI).
+     */
+    val snapshotId: String? = null
 )
 
 data class PlaylistStats(

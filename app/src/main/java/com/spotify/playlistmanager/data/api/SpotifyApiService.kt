@@ -26,6 +26,19 @@ interface SpotifyApiService {
             "items(track(id,name,artists(id,name),album(id,name,images,release_date),duration_ms,popularity,uri,preview_url)),next,total,offset"
     ): PlaylistTracksResponse
 
+    /**
+     * Tani endpoint do walidacji cache — zwraca tylko snapshot_id.
+     * Odpowiedź ~50B vs setki KB dla pełnego fetcha utworów.
+     *
+     * Użycie: przed otworzeniem playlisty porównaj wynik z cache.tracks_snapshot_id.
+     * Jeśli identyczny — cache jest aktualny i nie musisz pobierać utworów.
+     */
+    @GET("v1/playlists/{id}")
+    suspend fun getPlaylistSnapshot(
+        @Path("id") playlistId: String,
+        @Query("fields") fields: String = "snapshot_id"
+    ): PlaylistSnapshotResponse
+
     // ── Polubione utwory ────────────────────────────────────────────────────
 
     @GET("v1/me/tracks")
