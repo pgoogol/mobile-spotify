@@ -1,15 +1,15 @@
 package com.spotify.playlistmanager.ui.screens.login
 
-import android.app.Activity
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.spotify.playlistmanager.BuildConfig
+import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.usecase.LogoutUseCase
+import com.spotify.playlistmanager.util.TokenManager
 import com.spotify.sdk.android.auth.AuthorizationClient
 import com.spotify.sdk.android.auth.AuthorizationRequest
 import com.spotify.sdk.android.auth.AuthorizationResponse
-import com.spotify.playlistmanager.BuildConfig
-import com.spotify.playlistmanager.data.repository.SpotifyRepository
-import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,16 +18,17 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 sealed class LoginUiState {
-    data object Idle    : LoginUiState()
+    data object Idle : LoginUiState()
     data object Loading : LoginUiState()
     data object Success : LoginUiState()
-    data class  Error(val message: String) : LoginUiState()
+    data class Error(val message: String) : LoginUiState()
 }
 
 @HiltViewModel
 class LoginViewModel @Inject constructor(
     private val tokenManager: TokenManager,
-    private val repository: SpotifyRepository
+    private val repository: SpotifyRepository,
+    private val logoutUseCase: LogoutUseCase
 ) : ViewModel() {
 
     val isLoggedIn = tokenManager.isLoggedIn
@@ -90,7 +91,7 @@ class LoginViewModel @Inject constructor(
                 viewModelScope.launch {
                     runCatching {
                         tokenManager.saveToken(
-                            accessToken  = response.accessToken,
+                            accessToken = response.accessToken,
                             expiresInSec = response.expiresIn
                         )
                         // Pobierz i zapisz profil użytkownika
@@ -102,8 +103,10 @@ class LoginViewModel @Inject constructor(
                     }
                 }
             }
+
             AuthorizationResponse.Type.ERROR ->
                 _uiState.value = LoginUiState.Error(response.error ?: "Błąd autoryzacji")
+
             else ->
                 _uiState.value = LoginUiState.Idle
         }
@@ -111,7 +114,7 @@ class LoginViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
-            tokenManager.clearTokens()
+            logoutUseCase()
             _uiState.value = LoginUiState.Idle
         }
     }

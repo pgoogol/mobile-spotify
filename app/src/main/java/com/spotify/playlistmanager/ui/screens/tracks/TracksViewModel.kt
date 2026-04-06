@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.PlaylistStats
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.data.model.TrackAudioFeatures
+import com.spotify.playlistmanager.domain.repository.CachePolicy
+import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
@@ -18,7 +20,9 @@ data class TracksUiState(
     val isLoading: Boolean = false,
     val tracks: List<Track> = emptyList(),
     val error: String? = null,
-    val stats: PlaylistStats? = null
+    val stats: PlaylistStats? = null,
+    /** Epoch ms ostatniego pobrania utworów z cache lub null gdy brak. */
+    val tracksFetchedAt: Long? = null
 )
 
 enum class SortColumn(val label: String) {
@@ -32,7 +36,8 @@ enum class SortColumn(val label: String) {
 @HiltViewModel
 class TracksViewModel @Inject constructor(
     private val repository: ISpotifyRepository,
-    private val featuresRepository: ITrackFeaturesRepository
+    private val featuresRepository: ITrackFeaturesRepository,
+    private val playlistCache: IPlaylistCacheRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TracksUiState(isLoading = true))
@@ -79,31 +84,88 @@ class TracksViewModel @Inject constructor(
             list
         }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    fun loadTracks(playlistId: String) {
+    /**
+     * Ładuje utwory z cache (jeśli są), a następnie odświeża w tle.
+     * Stale-while-revalidate: użytkownik widzi listę natychmiast.
+     *
+     * @param forceRefresh true = pull-to-refresh, pomija cache
+     */
+    fun loadTracks(playlistId: String, forceRefresh: Boolean = false) {
         viewModelScope.launch {
+            if (!forceRefresh) {
+                // 1) Spróbuj pokazać cache natychmiast
+                val cached = runCatching {
+                    if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
+                        repository.getLikedTracks(CachePolicy.CACHE_ONLY)
+                    else
+                        repository.getPlaylistTracks(playlistId, CachePolicy.CACHE_ONLY)
+                }.getOrNull().orEmpty()
+
+                if (cached.isNotEmpty()) {
+                    _state.value = TracksUiState(
+                        tracks = cached,
+                        stats = computeStats(cached),
+                        tracksFetchedAt = playlistCache.getTracksFetchedAt(playlistId)
+                    )
+                    loadFeaturesFor(cached)
+                    refreshTracksInBackground(playlistId)
+                    return@launch
+                }
+            }
+
+            // Brak cache lub forceRefresh — pokaż loader
             _state.value = TracksUiState(isLoading = true)
+            val policy = if (forceRefresh) CachePolicy.NETWORK_ONLY else CachePolicy.CACHE_FIRST
             runCatching {
                 if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
-                    repository.getLikedTracks()
+                    repository.getLikedTracks(policy)
                 else
-                    repository.getPlaylistTracks(playlistId)
+                    repository.getPlaylistTracks(playlistId, policy)
             }.onSuccess { tracks ->
                 _state.value = TracksUiState(
                     tracks = tracks,
-                    stats  = computeStats(tracks)
+                    stats = computeStats(tracks),
+                    tracksFetchedAt = playlistCache.getTracksFetchedAt(playlistId)
                 )
-                // Ładuj audio features z Room cache (jeśli dostępne)
-                val trackIds = tracks.mapNotNull { it.id }
-                if (trackIds.isNotEmpty()) {
-                    runCatching {
-                        featuresRepository.getFeaturesMap(trackIds)
-                    }.onSuccess { map ->
-                        _featuresMap.value = map
-                    }
-                }
+                loadFeaturesFor(tracks)
             }.onFailure { e ->
                 _state.value = TracksUiState(error = e.message ?: "Błąd ładowania")
             }
+        }
+    }
+
+    private fun refreshTracksInBackground(playlistId: String) {
+        viewModelScope.launch {
+            runCatching {
+                if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
+                    repository.getLikedTracks(CachePolicy.CACHE_FIRST)
+                else
+                    repository.getPlaylistTracks(playlistId, CachePolicy.CACHE_FIRST)
+            }.onSuccess { fresh ->
+                val current = _state.value.tracks
+                if (current != fresh) {
+                    _state.value = TracksUiState(
+                        tracks = fresh,
+                        stats = computeStats(fresh),
+                        tracksFetchedAt = playlistCache.getTracksFetchedAt(playlistId)
+                    )
+                    loadFeaturesFor(fresh)
+                } else {
+                    // Nawet jeśli dane się nie zmieniły, zaktualizuj timestamp świeżości
+                    _state.value = _state.value.copy(
+                        tracksFetchedAt = playlistCache.getTracksFetchedAt(playlistId)
+                    )
+                }
+            }
+            // Błąd w tle ignorujemy
+        }
+    }
+
+    private suspend fun loadFeaturesFor(tracks: List<Track>) {
+        val trackIds = tracks.mapNotNull { it.id }
+        if (trackIds.isNotEmpty()) {
+            runCatching { featuresRepository.getFeaturesMap(trackIds) }
+                .onSuccess { _featuresMap.value = it }
         }
     }
 

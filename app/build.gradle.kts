@@ -15,11 +15,15 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.8.0"
+        versionName = "0.9.1"
 
         // ⚠️  Uzupełnij własne dane z developer.spotify.com/dashboard
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"3298169ef5a64bf39b6c1466e304c790\"")
-        buildConfigField("String", "SPOTIFY_REDIRECT_URI", "\"com.spotify.playlistmanager://callback\"")
+        buildConfigField(
+            "String",
+            "SPOTIFY_REDIRECT_URI",
+            "\"com.spotify.playlistmanager://callback\""
+        )
 
         // Wymagane przez Spotify Auth SDK >= 2.0
         manifestPlaceholders["redirectSchemeName"] = "com.spotify.playlistmanager"
@@ -107,4 +111,6 @@ dependencies {
     ksp(libs.room.compiler)
 
     testImplementation(kotlin("test"))
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.junit)
 }

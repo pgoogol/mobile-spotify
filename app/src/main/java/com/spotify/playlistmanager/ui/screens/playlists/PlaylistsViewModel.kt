@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.repository.SpotifyRepository
+import com.spotify.playlistmanager.domain.repository.CachePolicy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -77,18 +78,56 @@ class PlaylistsViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    init { loadPlaylists() }
+    init {
+        this.loadPlaylists()
+    }
 
-    fun loadPlaylists() {
-        _uiState.value = PlaylistsUiState.Loading
+    /**
+     * Ładuje playlisty z cache (jeśli są), a następnie odświeża w tle.
+     * Stale-while-revalidate: użytkownik widzi listę natychmiast.
+     *
+     * @param forceRefresh true = pull-to-refresh, pomija cache
+     */
+    fun loadPlaylists(forceRefresh: Boolean = false) {
         viewModelScope.launch {
-            runCatching { repository.getUserPlaylists() }
+            if (!forceRefresh) {
+                // 1) Spróbuj pokazać cache natychmiast
+                val cached = runCatching {
+                    repository.getUserPlaylists(CachePolicy.CACHE_ONLY)
+                }.getOrNull().orEmpty()
+
+                if (cached.isNotEmpty()) {
+                    _uiState.value = PlaylistsUiState.Success(cached)
+                    // 2) Odśwież w tle (cache_first sprawdzi TTL)
+                    refreshInBackground()
+                    return@launch
+                }
+            }
+
+            // Brak cache lub forceRefresh — pokaż loader
+            _uiState.value = PlaylistsUiState.Loading
+            val policy = if (forceRefresh) CachePolicy.NETWORK_ONLY else CachePolicy.CACHE_FIRST
+            runCatching { repository.getUserPlaylists(policy) }
                 .onSuccess { _uiState.value = PlaylistsUiState.Success(it) }
                 .onFailure { e ->
                     _uiState.value = PlaylistsUiState.Error(
-                        e.message ?: "Błąd pobierania playlist"
+                        e.message ?: "Nieznany błąd"
                     )
                 }
+        }
+    }
+
+    private fun refreshInBackground() {
+        viewModelScope.launch {
+            runCatching {
+                repository.getUserPlaylists(CachePolicy.CACHE_FIRST)
+            }.onSuccess { fresh ->
+                val current = (_uiState.value as? PlaylistsUiState.Success)?.playlists
+                if (current != fresh) {
+                    _uiState.value = PlaylistsUiState.Success(fresh)
+                }
+            }
+            // Błąd w tle ignorujemy — user widzi cache
         }
     }
 

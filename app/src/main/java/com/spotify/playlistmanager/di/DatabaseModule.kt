@@ -2,13 +2,18 @@ package com.spotify.playlistmanager.di
 
 import android.content.Context
 import androidx.room.Room
+import coil.annotation.ExperimentalCoilApi
+import com.spotify.playlistmanager.data.cache.CoilImageCacheCleaner
 import com.spotify.playlistmanager.data.cache.GeneratorTemplateDao
 import com.spotify.playlistmanager.data.cache.PlaylistCacheDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDatabase
 import com.spotify.playlistmanager.data.repository.GeneratorTemplateRepository
+import com.spotify.playlistmanager.data.repository.PlaylistCacheRepository
 import com.spotify.playlistmanager.data.repository.TrackFeaturesRepository
+import com.spotify.playlistmanager.domain.cache.IImageCacheCleaner
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
+import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import dagger.Binds
 import dagger.Module
@@ -63,4 +68,17 @@ abstract class DatabaseBindings {
     abstract fun bindGeneratorTemplateRepository(
         impl: GeneratorTemplateRepository
     ): IGeneratorTemplateRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPlaylistCacheRepository(
+        impl: PlaylistCacheRepository
+    ): IPlaylistCacheRepository
+
+    @ExperimentalCoilApi
+    @Binds
+    @Singleton
+    abstract fun bindImageCacheCleaner(
+        impl: CoilImageCacheCleaner
+    ): IImageCacheCleaner
 }

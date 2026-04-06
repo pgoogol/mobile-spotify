@@ -2,6 +2,8 @@ package com.spotify.playlistmanager.data.repository
 
 import com.spotify.playlistmanager.data.api.SpotifyApiService
 import com.spotify.playlistmanager.data.model.*
+import com.spotify.playlistmanager.domain.repository.CachePolicy
+import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.util.TokenManager
 import kotlinx.coroutines.Dispatchers
@@ -12,55 +14,157 @@ import javax.inject.Singleton
 /**
  * Implementacja ISpotifyRepository.
  *
- * Zmiany względem poprzedniej wersji:
- * - Usunięto filtrowanie playlist po ownerId — zwracane są wszystkie playlisty
- *   użytkownika, w tym obserwowane (collaborative). Filtr po właścicielu
- *   blokował dostęp do playlist współdzielonych.
- * - Mapery używają TrackAudioFeatures (domenowy) zamiast TrackFeaturesCache (Room).
- * - Usunięto LocalCsvImportHelper (funkcja CSV została usunięta z aplikacji).
- * - Dodano addToQueue (POST /v1/me/player/queue).
+ * Etap 7: Dodano cache-first dla read operations.
+ *  - getUserPlaylists / getPlaylistTracks / getLikedTracks honorują CachePolicy
+ *  - Walidacja snapshot_id dla utworów playlisty (tani request ~50B)
+ *  - TTL 5 min dla listy playlist, 10 min dla Liked Songs
+ *  - Wszystkie sukcesy fetcha aktualizują cache
+ *
+ * Etap 10: Inwalidacja cache po write operations.
+ *  - createPlaylist → invalidatePlaylistsList
+ *  - addTracksToPlaylist → invalidateTracks dla danej playlisty
  */
 @Singleton
 class SpotifyRepository @Inject constructor(
     private val api: SpotifyApiService,
-    private val tokenManager: TokenManager
+    private val tokenManager: TokenManager,
+    private val cache: IPlaylistCacheRepository
 ) : ISpotifyRepository {
+
+    companion object {
+        /** TTL listy playlist — krótkie, bo użytkownik może często zmieniać. */
+        private const val PLAYLISTS_TTL_MS = 5 * 60 * 1000L  // 5 min
+        /** TTL Liked Songs — dłuższe, lajki dodawane rzadziej niż edytowane playlisty. */
+        private const val LIKED_TRACKS_TTL_MS = 10 * 60 * 1000L  // 10 min
+        /** ID syntetycznej playlisty Liked Songs — zgodny z GeneratePlaylistUseCase.LIKED_SONGS_ID. */
+        private const val LIKED_ID = "__liked__"
+    }
 
     // ════════════════════════════════════════════════════════
     //  Playlisty użytkownika
     // ════════════════════════════════════════════════════════
 
-    override suspend fun getUserPlaylists(): List<Playlist> = withContext(Dispatchers.IO) {
-        val all = mutableListOf<SpotifyPlaylist>()
-        var offset = 0
-        val limit = 50
-        do {
-            val page = api.getUserPlaylists(limit = limit, offset = offset)
-            all.addAll(page.items)
-            offset += limit
-        } while (page.next != null)
-        all.map { it.toDomain() }
-    }
+    /** Backward-compat wariant — używa CACHE_FIRST. */
+    override suspend fun getUserPlaylists(): List<Playlist> =
+        getUserPlaylists(CachePolicy.CACHE_FIRST)
+
+    override suspend fun getUserPlaylists(policy: CachePolicy): List<Playlist> =
+        withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+
+            when (policy) {
+                CachePolicy.CACHE_ONLY -> return@withContext cache.getCachedPlaylists()
+
+                CachePolicy.CACHE_FIRST -> {
+                    if (cache.isPlaylistsCacheFresh(PLAYLISTS_TTL_MS, now)) {
+                        val cached = cache.getCachedPlaylists()
+                        if (cached.isNotEmpty()) return@withContext cached
+                    }
+                }
+
+                CachePolicy.NETWORK_ONLY -> { /* fall through */ }
+            }
+
+            // Fetch z API
+            val fresh = fetchAllPlaylistsFromApi()
+            cache.cachePlaylists(fresh, now)
+            fresh
+        }
 
     // ════════════════════════════════════════════════════════
     //  Utwory z playlisty
     // ════════════════════════════════════════════════════════
 
+    /** Backward-compat wariant — używa CACHE_FIRST. */
     override suspend fun getPlaylistTracks(playlistId: String): List<Track> =
-        withContext(Dispatchers.IO) {
-            fetchAllPlaylistItems(playlistId).mapNotNull { it.track?.toDomain() }
+        getPlaylistTracks(playlistId, CachePolicy.CACHE_FIRST)
+
+    override suspend fun getPlaylistTracks(
+        playlistId: String,
+        policy: CachePolicy
+    ): List<Track> = withContext(Dispatchers.IO) {
+        if (policy == CachePolicy.CACHE_ONLY) {
+            return@withContext cache.getCachedTracks(playlistId) ?: emptyList()
         }
 
-    override suspend fun getLikedTracks(): List<Track> = withContext(Dispatchers.IO) {
-        val items = mutableListOf<PlaylistTrackItem>()
-        var offset = 0
-        do {
-            val page = api.getLikedTracks(limit = 50, offset = offset)
-            items.addAll(page.items)
-            offset += 50
-        } while (page.next != null)
-        items.mapNotNull { it.track?.toDomain() }
+        if (policy == CachePolicy.CACHE_FIRST) {
+            // Pobierz aktualny snapshot_id (tani request ~50B) i porównaj z cache
+            val currentSnapshot = runCatching {
+                api.getPlaylistSnapshot(playlistId).snapshot_id
+            }.getOrNull()
+
+            if (currentSnapshot != null && cache.areTracksFresh(playlistId, currentSnapshot)) {
+                cache.getCachedTracks(playlistId)?.let { return@withContext it }
+            }
+        }
+
+        // NETWORK_ONLY albo cache nieaktualny — pełen fetch
+        val items = fetchAllPlaylistItems(playlistId)
+        val tracks = items.mapNotNull { it.track?.toDomain() }
+
+        // Zapisz do cache. Snapshot pobieramy ponownie, na wypadek zmiany w trakcie fetcha.
+        val finalSnapshot = runCatching {
+            api.getPlaylistSnapshot(playlistId).snapshot_id
+        }.getOrNull()
+
+        // Potrzebujemy nagłówka do cache'owania. Jeśli nie ma w cache, sprokurujemy minimalny.
+        val playlistHeader = cache.getCachedPlaylists().find { it.id == playlistId }
+            ?: Playlist(
+                id = playlistId,
+                name = "",       // i tak zostanie nadpisany przy następnym getUserPlaylists
+                description = null,
+                imageUrl = null,
+                trackCount = tracks.size,
+                ownerId = "",
+                snapshotId = finalSnapshot
+            )
+
+        cache.cacheTracks(
+            playlist = playlistHeader,
+            tracks = tracks,
+            snapshotId = finalSnapshot,
+            now = System.currentTimeMillis()
+        )
+        tracks
     }
+
+    /** Backward-compat wariant — używa CACHE_FIRST. */
+    override suspend fun getLikedTracks(): List<Track> =
+        getLikedTracks(CachePolicy.CACHE_FIRST)
+
+    override suspend fun getLikedTracks(policy: CachePolicy): List<Track> =
+        withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+
+            when (policy) {
+                CachePolicy.CACHE_ONLY ->
+                    return@withContext cache.getCachedTracks(LIKED_ID) ?: emptyList()
+
+                CachePolicy.CACHE_FIRST -> {
+                    if (cache.isLikedTracksFresh(LIKED_TRACKS_TTL_MS, now)) {
+                        cache.getCachedTracks(LIKED_ID)?.let { return@withContext it }
+                    }
+                }
+
+                CachePolicy.NETWORK_ONLY -> { /* fall through */ }
+            }
+
+            // Fetch z API
+            val fresh = fetchLikedTracksFromApi()
+
+            // Stwórz syntetyczny nagłówek dla Liked Songs
+            val likedHeader = Playlist(
+                id = LIKED_ID,
+                name = "❤ Polubione utwory",
+                description = null,
+                imageUrl = null,
+                trackCount = fresh.size,
+                ownerId = tokenManager.getUserId() ?: "",
+                snapshotId = null
+            )
+            cache.cacheTracks(likedHeader, fresh, snapshotId = null, now = now)
+            fresh
+        }
 
     // ════════════════════════════════════════════════════════
     //  Tworzenie playlisty
@@ -72,10 +176,13 @@ class SpotifyRepository @Inject constructor(
                 ?: api.getCurrentUser()
                     .also { tokenManager.saveUserInfo(it.id, it.display_name) }
                     .id
-            api.createPlaylist(
+            val newId = api.createPlaylist(
                 userId,
                 CreatePlaylistRequest(name = name, description = description, public = false)
             ).id
+            // Inwaliduj listę playlist — następne getUserPlaylists pobierze świeże dane
+            cache.invalidatePlaylistsList()
+            newId
         }
 
     override suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>) =
@@ -83,6 +190,8 @@ class SpotifyRepository @Inject constructor(
             uris.chunked(100).forEach { chunk ->
                 api.addTracksToPlaylist(playlistId, AddTracksRequest(uris = chunk))
             }
+            // Inwaliduj cache utworów tej playlisty
+            cache.invalidateTracks(playlistId)
         }
 
     // ════════════════════════════════════════════════════════
@@ -143,6 +252,29 @@ class SpotifyRepository @Inject constructor(
     // ════════════════════════════════════════════════════════
     //  Prywatne pomocnicze
     // ════════════════════════════════════════════════════════
+
+    private suspend fun fetchAllPlaylistsFromApi(): List<Playlist> {
+        val all = mutableListOf<SpotifyPlaylist>()
+        var offset = 0
+        val limit = 50
+        do {
+            val page = api.getUserPlaylists(limit = limit, offset = offset)
+            all.addAll(page.items)
+            offset += limit
+        } while (page.next != null)
+        return all.map { it.toDomain() }
+    }
+
+    private suspend fun fetchLikedTracksFromApi(): List<Track> {
+        val items = mutableListOf<PlaylistTrackItem>()
+        var offset = 0
+        do {
+            val page = api.getLikedTracks(limit = 50, offset = offset)
+            items.addAll(page.items)
+            offset += 50
+        } while (page.next != null)
+        return items.mapNotNull { it.track?.toDomain() }
+    }
 
     private suspend fun fetchAllPlaylistItems(playlistId: String): List<PlaylistTrackItem> {
         val items = mutableListOf<PlaylistTrackItem>()

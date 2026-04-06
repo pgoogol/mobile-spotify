@@ -19,12 +19,16 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.room.runtime)
+    implementation(libs.coil.compose)
+
+    implementation(libs.hilt.android)
+
     // Room usunięty z :shared – TrackFeaturesCache (@Entity) przeniesiony do :app/data/cache
     // :shared nie zna żadnych bibliotek Androidowych specyficznych dla warstwy danych
-    compileOnly("javax.inject:javax.inject:1")
+    compileOnly(libs.javax.inject)
 
     // Testy jednostkowe – bez emulatora
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     implementation(kotlin("test"))
 }

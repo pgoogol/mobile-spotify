@@ -3,12 +3,13 @@ package com.spotify.playlistmanager.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.api.AuthEventBus
+import com.spotify.playlistmanager.domain.usecase.LogoutUseCase
 import com.spotify.playlistmanager.util.SpotifyAppRemoteManager
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -25,9 +26,10 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val tokenManager:     TokenManager,
+    private val tokenManager: TokenManager,
     private val appRemoteManager: SpotifyAppRemoteManager,
-    private val authEventBus:     AuthEventBus
+    private val authEventBus: AuthEventBus,
+    private val logoutUseCase: LogoutUseCase
 ) : ViewModel() {
 
     // ── Stany obserwowane przez UI ────────────────────────────────────────────
@@ -71,8 +73,7 @@ class MainViewModel @Inject constructor(
     /** Wylogowuje i czyści tokeny — wywoływane przy zdarzeniu 401 lub przez użytkownika. */
     fun forceLogout() {
         viewModelScope.launch {
-            appRemoteManager.disconnect()
-            tokenManager.clearTokens()
+            logoutUseCase()
         }
     }
 

@@ -13,6 +13,7 @@ import com.spotify.playlistmanager.domain.model.GenerationRound
 import com.spotify.playlistmanager.domain.model.GeneratorTemplate
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.domain.model.TemplateSource
+import com.spotify.playlistmanager.domain.repository.CachePolicy
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
@@ -97,8 +98,6 @@ class GenerateViewModel @Inject constructor(
     private val templateRepository: IGeneratorTemplateRepository
 ) : ViewModel() {
 
-    /** Cache tracków per playlista — lazy loading, resetowany z sesją. */
-    private val tracksCache: MutableMap<String, List<Track>> = mutableMapOf()
     private val _state = MutableStateFlow(GenerateUiState())
     val state: StateFlow<GenerateUiState> = _state.asStateFlow()
 
@@ -232,23 +231,16 @@ class GenerateViewModel @Inject constructor(
         val source = _state.value.sources.find { it.id == sourceId } ?: return
         val playlistId = source.playlist?.id ?: return
 
-        val cached = tracksCache[playlistId]
-        if (cached != null) {
-            _state.update {
-                it.copy(pinningState = PinningState.Picking(sourceId, cached))
-            }
-            return
-        }
-
         viewModelScope.launch {
             _state.update { it.copy(pinningState = PinningState.Loading(sourceId)) }
             runCatching {
+                // CACHE_FIRST: jeśli świeże, repository zwraca z Roomowego cache
+                // bez requestu sieciowego. Inaczej fetch + zapis cache w jednym kroku.
                 if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
-                    repository.getLikedTracks()
+                    repository.getLikedTracks(CachePolicy.CACHE_FIRST)
                 else
-                    repository.getPlaylistTracks(playlistId)
+                    repository.getPlaylistTracks(playlistId, CachePolicy.CACHE_FIRST)
             }.onSuccess { tracks ->
-                tracksCache[playlistId] = tracks
                 _state.update {
                     it.copy(pinningState = PinningState.Picking(sourceId, tracks))
                 }
@@ -266,8 +258,29 @@ class GenerateViewModel @Inject constructor(
     fun refreshPinningTracks(sourceId: String) {
         val source = _state.value.sources.find { it.id == sourceId } ?: return
         val playlistId = source.playlist?.id ?: return
-        tracksCache.remove(playlistId)
-        openPinningDialog(sourceId)
+
+        viewModelScope.launch {
+            _state.update { it.copy(pinningState = PinningState.Loading(sourceId)) }
+            runCatching {
+                // NETWORK_ONLY: wymuszony refresh, omija cache.
+                // Repository i tak zaktualizuje cache po sukcesie.
+                if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
+                    repository.getLikedTracks(CachePolicy.NETWORK_ONLY)
+                else
+                    repository.getPlaylistTracks(playlistId, CachePolicy.NETWORK_ONLY)
+            }.onSuccess { tracks ->
+                _state.update {
+                    it.copy(pinningState = PinningState.Picking(sourceId, tracks))
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        pinningState = PinningState.Idle,
+                        error = "Nie udało się odświeżyć utworów: ${e.message}"
+                    )
+                }
+            }
+        }
     }
 
     fun closePinningDialog() {
@@ -717,10 +730,11 @@ class GenerateViewModel @Inject constructor(
                 isSessionActive = false,
                 savedPlaylistUrl = null,
                 showQueueDryRun = false,
-                pinningState = PinningState.Idle  // ← NOWE
+                pinningState = PinningState.Idle
             )
         }
-        tracksCache.clear()  // ← NOWE
+        // tracksCache usunięty — Roomowy cache w IPlaylistCacheRepository
+        // jest persistent i sam zarządza świeżością przez snapshot_id.
     }
 
     fun clearError() {

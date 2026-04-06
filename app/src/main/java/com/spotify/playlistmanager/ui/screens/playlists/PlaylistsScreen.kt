@@ -126,7 +126,7 @@ fun PlaylistsScreen(
             // ── Zawartość ──────────────────────────────────────────────
             PullToRefreshBox(
                 isRefreshing = uiState is PlaylistsUiState.Loading,
-                onRefresh    = viewModel::loadPlaylists,
+                onRefresh    = { viewModel.loadPlaylists(forceRefresh = true) },
                 modifier     = Modifier.fillMaxSize()
             ) {
                 when {
