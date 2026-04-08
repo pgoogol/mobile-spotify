@@ -15,6 +15,7 @@ import com.spotify.playlistmanager.domain.model.GenerateResult
 import com.spotify.playlistmanager.domain.model.GenerationRound
 import com.spotify.playlistmanager.domain.model.GeneratorTemplate
 import com.spotify.playlistmanager.domain.model.MatchedTrack
+import com.spotify.playlistmanager.domain.model.SegmentMatchResult
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.domain.model.TemplateSource
 import com.spotify.playlistmanager.domain.repository.CachePolicy
@@ -89,7 +90,10 @@ data class GenerateUiState(
     val replacementState: ReplacementState = ReplacementState.Idle,
 
     /** Snapshot ostatniej wymiany do obsługi Undo. Null = brak dostępnego Undo. */
-    val lastReplacement: ReplacementSnapshot? = null
+    val lastReplacement: ReplacementSnapshot? = null,
+
+    /** Czy wykres pokazuje tylko ostatnią rundę (true) czy całą sesję (false). */
+    val chartShowOnlyLastRound: Boolean = false
 )
 
 /**
@@ -435,7 +439,7 @@ class GenerateViewModel @Inject constructor(
             var runningUsedIds = currentState.usedTrackIds
             val newRounds = mutableListOf<GenerationRound>()
             val allNewTracks = mutableListOf<Track>()
-            var lastGenerateResult: GenerateResult? = null
+            val accumulatedSegments = mutableListOf<SegmentMatchResult>()
             var lastExhaustionStatuses = emptyList<ExhaustionStatus>()
             var exhausted = false
 
@@ -457,7 +461,12 @@ class GenerateViewModel @Inject constructor(
                     }
 
                     val newTracks = result.generateResult.tracks
-                    lastGenerateResult = result.generateResult
+                    // Numer rundy = ile rund już było w sesji + ile w bieżącej pętli + 1
+                    val thisRoundNumber =
+                        currentState.generationHistory.size + newRounds.size + 1
+                    accumulatedSegments.addAll(
+                        result.generateResult.segments.map { it.copy(roundNumber = thisRoundNumber) }
+                    )
                     lastExhaustionStatuses = result.exhaustionStatuses
 
                     if (newTracks.isEmpty()) {
@@ -569,12 +578,33 @@ class GenerateViewModel @Inject constructor(
             // Kumuluj podgląd: istniejące + nowe
             val cumulativePreview = (currentState.previewTracks ?: emptyList()) + allNewTracks
 
+            // Kumuluj segmenty wykresu: stare segmenty sesji + nowo wygenerowane.
+            // Dzięki temu wykres pokazuje cała historię, nie tylko ostatnią rundę.
+            val mergedSegments = if (currentState.isSessionActive) {
+                (currentState.generateResult?.segments.orEmpty()) + accumulatedSegments
+            } else {
+                accumulatedSegments.toList()
+            }
+
+            val mergedGenerateResult: GenerateResult? = if (mergedSegments.isEmpty()) {
+                null
+            } else {
+                val curveSegs = mergedSegments.filter { it.targetScores.isNotEmpty() }
+                val overall = if (curveSegs.isEmpty()) 1f
+                else curveSegs.map { it.matchPercentage }.average().toFloat()
+                GenerateResult(
+                    tracks = mergedSegments.flatMap { seg -> seg.tracks.map { it.track } },
+                    segments = mergedSegments,
+                    overallMatchPercentage = overall
+                )
+            }
+
             _state.update {
                 it.copy(
                     isGenerating = false,
                     repeatProgress = 0,
                     previewTracks = cumulativePreview.ifEmpty { it.previewTracks },
-                    generateResult = lastGenerateResult ?: it.generateResult,
+                    generateResult = mergedGenerateResult ?: it.generateResult,
                     usedTrackIds = runningUsedIds,
                     generationHistory = it.generationHistory + newRounds,
                     exhaustionStatuses = lastExhaustionStatuses.ifEmpty { it.exhaustionStatuses },
@@ -625,6 +655,13 @@ class GenerateViewModel @Inject constructor(
      */
     fun generateMore() {
         generatePreview()
+    }
+
+    /**
+     * Przełącza widok wykresu między "cała sesja" a "tylko ostatnia runda".
+     */
+    fun toggleChartScope() {
+        _state.update { it.copy(chartShowOnlyLastRound = !it.chartShowOnlyLastRound) }
     }
 
     // ══════════════════════════════════════════════════════════════════════

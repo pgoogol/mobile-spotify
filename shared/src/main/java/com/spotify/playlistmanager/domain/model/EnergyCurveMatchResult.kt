@@ -13,7 +13,13 @@ data class SegmentMatchResult(
     /** Procent dopasowania: 1 − avg(|target − actual|). Zakres [0, 1]. */
     val matchPercentage: Float,
     /** Score ostatniego utworu (do smooth join z następnym segmentem). */
-    val lastScore: Float
+    val lastScore: Float,
+    /**
+     * Numer rundy generowania, do której należy ten segment.
+     * 0 = nieznana (backward compat dla starych testów / ścieżki bez krzywych).
+     * Nadawane przez ViewModel przy akumulacji segmentów w sesji.
+     */
+    val roundNumber: Int = 0
 )
 
 /**

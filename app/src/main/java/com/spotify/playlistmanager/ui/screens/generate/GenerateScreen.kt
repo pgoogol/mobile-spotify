@@ -354,6 +354,8 @@ fun GenerateScreen(
                             segments = result.segments,
                             overallMatchPercentage = result.overallMatchPercentage,
                             isDryRun = false,
+                            showOnlyLastRound = state.chartShowOnlyLastRound,
+                            onToggleScope = viewModel::toggleChartScope,
                             modifier = Modifier.padding(horizontal = 8.dp)
                         )
                     }
