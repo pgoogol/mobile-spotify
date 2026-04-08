@@ -38,6 +38,12 @@ data class GenerationRound(
      * gdy composite score nie został obliczony (np. stare dane z historii).
      */
     val matchedTracks: List<MatchedTrack> = emptyList(),
+    /**
+     * Mapa trackId → sourcePlaylistId — z którego źródła pochodzi dany utwór.
+     * Używane przez funkcję wymiany utworu, żeby znaleźć kandydatów z tej
+     * samej playlisty źródłowej. Pusta dla backward compatibility.
+     */
+    val trackToSourceMap: Map<String, String> = emptyMap(),
     val timestamp: Long = System.currentTimeMillis()
 )
 

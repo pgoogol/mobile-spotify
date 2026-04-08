@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
+import com.spotify.playlistmanager.data.model.SortOption
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.data.model.TrackAudioFeatures
 import com.spotify.playlistmanager.domain.model.CompositeScoreCalculator
@@ -20,6 +21,7 @@ import com.spotify.playlistmanager.domain.repository.CachePolicy
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
+import com.spotify.playlistmanager.domain.usecase.FindReplacementsUseCase
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -81,7 +83,13 @@ data class GenerateUiState(
     val repeatProgress: Int = 0,
 
     /** Stan dialogu przypinania utworów. */
-    val pinningState: PinningState = PinningState.Idle
+    val pinningState: PinningState = PinningState.Idle,
+
+    /** Stan procesu wymiany utworu. */
+    val replacementState: ReplacementState = ReplacementState.Idle,
+
+    /** Snapshot ostatniej wymiany do obsługi Undo. Null = brak dostępnego Undo. */
+    val lastReplacement: ReplacementSnapshot? = null
 )
 
 /**
@@ -96,12 +104,43 @@ sealed class PinningState {
     ) : PinningState()
 }
 
+/**
+ * Stan procesu wymiany pojedynczego utworu w podglądzie.
+ */
+sealed class ReplacementState {
+    data object Idle : ReplacementState()
+    data class Loading(val previewIndex: Int) : ReplacementState()
+    data class Picking(
+        val previewIndex: Int,
+        val originalTrack: Track,
+        val originalCompositeScore: Float,
+        val candidates: List<FindReplacementsUseCase.ReplacementCandidate>
+    ) : ReplacementState()
+
+    data class Error(val message: String) : ReplacementState()
+}
+
+/**
+ * Snapshot pojedynczej wymiany — do obsługi Undo przez snackbar.
+ * Po wykonaniu kolejnej wymiany lub innej operacji na podglądzie snapshot jest czyszczony.
+ */
+data class ReplacementSnapshot(
+    val previewIndex: Int,
+    val removedTrackId: String,
+    val removedTrack: Track,
+    val removedMatched: MatchedTrack?,
+    val removedSourcePlaylistId: String?,
+    val insertedTrackId: String,
+    val roundNumber: Int
+)
+
 @HiltViewModel
 class GenerateViewModel @Inject constructor(
     private val repository: ISpotifyRepository,
     private val generatePlaylist: GeneratePlaylistUseCase,
     private val templateRepository: IGeneratorTemplateRepository,
-    private val featuresRepository: ITrackFeaturesRepository
+    private val featuresRepository: ITrackFeaturesRepository,
+    private val findReplacements: FindReplacementsUseCase
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(GenerateUiState())
@@ -432,12 +471,27 @@ class GenerateViewModel @Inject constructor(
                     allNewTracks.addAll(newTracks)
 
                     val roundMatched = result.generateResult.segments.flatMap { it.tracks }
+
+                    // Zbuduj mapę trackId → sourcePlaylistId.
+                    // Segments są w tej samej kolejności co sources, więc iterujemy parami.
+                    val sourceMap = buildMap<String, String> {
+                        result.generateResult.segments.forEachIndexed { segIdx, segment ->
+                            val srcPlaylistId =
+                                sources.getOrNull(segIdx)?.playlist?.id ?: return@forEachIndexed
+                            for (mt in segment.tracks) {
+                                val id = mt.track.id ?: continue
+                                put(id, srcPlaylistId)
+                            }
+                        }
+                    }
+
                     val round = GenerationRound(
                         roundNumber = currentState.generationHistory.size + newRounds.size + 1,
                         templateName = templateName,
                         trackIds = newIds,
                         tracks = newTracks,
-                        matchedTracks = roundMatched
+                        matchedTracks = roundMatched,
+                        trackToSourceMap = sourceMap
                     )
                     newRounds.add(round)
 
@@ -477,12 +531,33 @@ class GenerateViewModel @Inject constructor(
                         MatchedTrack(track = track, compositeScore = score, targetScore = 0f)
                     }
 
+                    // Mapowanie trackId → sourcePlaylistId dla ścieżki bez krzywych.
+                    // Bez krzywych nie mamy segments, więc przypisujemy utwory do sources
+                    // sekwencyjnie (w kolejności generowania: source[0] dostaje pierwsze N, itd.)
+                    // UWAGA: ta ścieżka używa GeneratePlaylistUseCase.invoke() które samo
+                    // iteruje po sources i bierze po trackCount z każdego — więc kolejność
+                    // utworów w 'tracks' odpowiada kolejności źródeł.
+                    val sourceMap = buildMap<String, String> {
+                        var cursor = 0
+                        for (src in sources) {
+                            val srcId = src.playlist?.id ?: continue
+                            val take = minOf(src.trackCount, tracks.size - cursor)
+                            if (take <= 0) break
+                            for (i in 0 until take) {
+                                val id = tracks[cursor + i].id ?: continue
+                                put(id, srcId)
+                            }
+                            cursor += take
+                        }
+                    }
+
                     val round = GenerationRound(
                         roundNumber = currentState.generationHistory.size + newRounds.size + 1,
                         templateName = templateName,
                         trackIds = newIds,
                         tracks = tracks,
-                        matchedTracks = roundMatched
+                        matchedTracks = roundMatched,
+                        trackToSourceMap = sourceMap
                     )
                     newRounds.add(round)
                 }
@@ -553,8 +628,344 @@ class GenerateViewModel @Inject constructor(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Zmiana kolejności / usuwanie w podglądzie
+    //  Wymiana pojedynczego utworu
     // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Automatyczna wymiana utworu na pierwszego kandydata (najlepsze dopasowanie).
+     * Zapisuje snapshot do ReplacementSnapshot dla obsługi Undo przez snackbar.
+     */
+    fun replaceTrackAuto(previewIndex: Int) {
+        val context = prepareReplacement(previewIndex) ?: return
+
+        _state.update { it.copy(replacementState = ReplacementState.Loading(previewIndex)) }
+
+        viewModelScope.launch {
+            val candidates = runCatching {
+                findReplacements(
+                    sourcePlaylistId = context.sourcePlaylistId,
+                    currentCompositeScore = context.originalCompositeScore,
+                    excludeTrackIds = context.excludeIds,
+                    energyCurve = context.energyCurve,
+                    sortBy = context.sortBy,
+                    maxResults = 1
+                )
+            }.getOrElse { e ->
+                _state.update {
+                    it.copy(
+                        replacementState = ReplacementState.Error(
+                            e.message ?: "Błąd wyszukiwania"
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            val best = candidates.firstOrNull()
+            if (best == null) {
+                _state.update {
+                    it.copy(
+                        replacementState = ReplacementState.Error(
+                            "Brak więcej utworów w playliście \"${context.sourcePlaylistName}\" do wymiany"
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            commitReplacement(context, best.track, best.compositeScore)
+            _state.update { it.copy(replacementState = ReplacementState.Idle) }
+        }
+    }
+
+    /**
+     * Otwiera picker z listą kandydatów do ręcznego wyboru.
+     */
+    fun startReplacementPicker(previewIndex: Int) {
+        val context = prepareReplacement(previewIndex) ?: return
+
+        _state.update { it.copy(replacementState = ReplacementState.Loading(previewIndex)) }
+
+        viewModelScope.launch {
+            val candidates = runCatching {
+                findReplacements(
+                    sourcePlaylistId = context.sourcePlaylistId,
+                    currentCompositeScore = context.originalCompositeScore,
+                    excludeTrackIds = context.excludeIds,
+                    energyCurve = context.energyCurve,
+                    sortBy = context.sortBy,
+                    maxResults = 10
+                )
+            }.getOrElse { e ->
+                _state.update {
+                    it.copy(
+                        replacementState = ReplacementState.Error(
+                            e.message ?: "Błąd wyszukiwania"
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            if (candidates.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        replacementState = ReplacementState.Error(
+                            "Brak więcej utworów w playliście \"${context.sourcePlaylistName}\" do wymiany"
+                        )
+                    )
+                }
+                return@launch
+            }
+
+            _state.update {
+                it.copy(
+                    replacementState = ReplacementState.Picking(
+                        previewIndex = previewIndex,
+                        originalTrack = context.originalTrack,
+                        originalCompositeScore = context.originalCompositeScore,
+                        candidates = candidates
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Potwierdzenie wyboru kandydata z pickera.
+     */
+    fun confirmReplacement(candidate: FindReplacementsUseCase.ReplacementCandidate) {
+        val picking = _state.value.replacementState as? ReplacementState.Picking ?: return
+        val context = prepareReplacement(picking.previewIndex) ?: return
+        commitReplacement(context, candidate.track, candidate.compositeScore)
+        _state.update { it.copy(replacementState = ReplacementState.Idle) }
+    }
+
+    /**
+     * Zamknięcie pickera bez zmian.
+     */
+    fun cancelReplacement() {
+        _state.update { it.copy(replacementState = ReplacementState.Idle) }
+    }
+
+    /**
+     * Cofa ostatnią wymianę (dostępne po tapnięciu "Cofnij" w snackbarze).
+     */
+    fun undoLastReplacement() {
+        val snapshot = _state.value.lastReplacement ?: return
+        val preview = _state.value.previewTracks?.toMutableList() ?: return
+        if (snapshot.previewIndex !in preview.indices) return
+
+        val insertedId = snapshot.insertedTrackId
+        val removedOriginal = snapshot.removedTrack
+        val removedId = snapshot.removedTrackId
+
+        // Przywróć utwór w podglądzie
+        preview[snapshot.previewIndex] = removedOriginal
+
+        // Cofnij zmiany w usedTrackIds: dodaj removedId, usuń insertedId
+        val updatedUsed = (_state.value.usedTrackIds - insertedId) + removedId
+
+        // Zrewertuj GenerationRound
+        val updatedHistory = _state.value.generationHistory.map { round ->
+            if (round.roundNumber != snapshot.roundNumber) return@map round
+
+            val newTrackIds = (round.trackIds - insertedId) + removedId
+            val newTracks = round.tracks.map { t ->
+                if (t.id == insertedId) removedOriginal else t
+            }
+            val newMatched = round.matchedTracks.map { mt ->
+                if (mt.track.id == insertedId) {
+                    snapshot.removedMatched ?: mt.copy(track = removedOriginal)
+                } else mt
+            }
+            val newSourceMap = buildMap<String, String> {
+                putAll(round.trackToSourceMap)
+                remove(insertedId)
+                snapshot.removedSourcePlaylistId?.let { put(removedId, it) }
+            }
+
+            round.copy(
+                trackIds = newTrackIds,
+                tracks = newTracks,
+                matchedTracks = newMatched,
+                trackToSourceMap = newSourceMap
+            )
+        }
+
+        _state.update {
+            it.copy(
+                previewTracks = preview,
+                usedTrackIds = updatedUsed,
+                generationHistory = updatedHistory,
+                lastReplacement = null
+            )
+        }
+
+        // Odśwież features dla przywróconego ID
+        loadFeaturesForCurrentPreview()
+    }
+
+    /**
+     * Czyści snapshot (wywoływane gdy snackbar znika lub pojawia się nowa operacja).
+     */
+    fun clearLastReplacement() {
+        if (_state.value.lastReplacement != null) {
+            _state.update { it.copy(lastReplacement = null) }
+        }
+    }
+
+    // ── Helpery wymiany ────────────────────────────────────────────────
+
+    /**
+     * Kontekst wymagany do przeprowadzenia wymiany: wszystkie informacje o oryginale
+     * oraz konfiguracja źródła potrzebna do wyszukiwania kandydatów.
+     */
+    private data class ReplacementContext(
+        val previewIndex: Int,
+        val originalTrack: Track,
+        val originalTrackId: String,
+        val originalMatched: MatchedTrack?,
+        val originalCompositeScore: Float,
+        val sourcePlaylistId: String,
+        val sourcePlaylistName: String,
+        val energyCurve: EnergyCurve,
+        val sortBy: SortOption,
+        val roundNumber: Int,
+        val excludeIds: Set<String>
+    )
+
+    private fun prepareReplacement(previewIndex: Int): ReplacementContext? {
+        val state = _state.value
+        val preview = state.previewTracks ?: return null
+        if (previewIndex !in preview.indices) return null
+
+        val original = preview[previewIndex]
+        val originalId = original.id ?: run {
+            _state.update {
+                it.copy(replacementState = ReplacementState.Error("Utwór bez ID — nie można wymienić"))
+            }
+            return null
+        }
+
+        // Znajdź rundę z której pochodzi ten utwór (pierwszą, która go zawiera)
+        val round = state.generationHistory.firstOrNull { originalId in it.trackIds }
+        if (round == null) {
+            _state.update {
+                it.copy(replacementState = ReplacementState.Error("Utwór spoza historii generowania"))
+            }
+            return null
+        }
+
+        val sourcePlaylistId = round.trackToSourceMap[originalId]
+        if (sourcePlaylistId == null) {
+            _state.update {
+                it.copy(
+                    replacementState = ReplacementState.Error(
+                        "Brak informacji o źródle utworu — wymień po ponownym wygenerowaniu"
+                    )
+                )
+            }
+            return null
+        }
+
+        // Znajdź aktualny PlaylistSource z tą playlistą (dla curve i sortBy)
+        val source = state.sources.firstOrNull { it.playlist?.id == sourcePlaylistId }
+        val energyCurve = source?.energyCurve ?: EnergyCurve.None
+        val sortBy = source?.sortBy ?: SortOption.NONE
+        val sourceName = source?.playlist?.name
+            ?: state.availablePlaylists.firstOrNull { it.id == sourcePlaylistId }?.name
+            ?: "nieznane źródło"
+
+        val matched = round.matchedTracks.firstOrNull { it.track.id == originalId }
+        val score = matched?.compositeScore ?: 0f
+
+        // Exclude: wszystkie utwory aktualnie w podglądzie (poza wymienianym, żeby go można było wymienić na nowy)
+        val excludeIds = preview.mapNotNull { it.id }.toSet()
+
+        return ReplacementContext(
+            previewIndex = previewIndex,
+            originalTrack = original,
+            originalTrackId = originalId,
+            originalMatched = matched,
+            originalCompositeScore = score,
+            sourcePlaylistId = sourcePlaylistId,
+            sourcePlaylistName = sourceName,
+            energyCurve = energyCurve,
+            sortBy = sortBy,
+            roundNumber = round.roundNumber,
+            excludeIds = excludeIds
+        )
+    }
+
+    private fun commitReplacement(
+        context: ReplacementContext,
+        newTrack: Track,
+        newCompositeScore: Float
+    ) {
+        val newId = newTrack.id ?: return
+        val state = _state.value
+        val preview = state.previewTracks?.toMutableList() ?: return
+        if (context.previewIndex !in preview.indices) return
+
+        preview[context.previewIndex] = newTrack
+
+        val updatedUsed = (state.usedTrackIds - context.originalTrackId) + newId
+
+        // Zaktualizuj rundę — podmień ID, track i matchedTrack
+        val updatedHistory = state.generationHistory.map { round ->
+            if (round.roundNumber != context.roundNumber) return@map round
+
+            val newTrackIds = (round.trackIds - context.originalTrackId) + newId
+            val newTracks = round.tracks.map { t ->
+                if (t.id == context.originalTrackId) newTrack else t
+            }
+            val newMatched = round.matchedTracks.map { mt ->
+                if (mt.track.id == context.originalTrackId) {
+                    // Zachowaj targetScore z oryginału — reprezentuje pozycję w krzywej
+                    MatchedTrack(
+                        track = newTrack,
+                        compositeScore = newCompositeScore,
+                        targetScore = mt.targetScore
+                    )
+                } else mt
+            }
+            val newSourceMap = buildMap<String, String> {
+                putAll(round.trackToSourceMap)
+                remove(context.originalTrackId)
+                put(newId, context.sourcePlaylistId)
+            }
+
+            round.copy(
+                trackIds = newTrackIds,
+                tracks = newTracks,
+                matchedTracks = newMatched,
+                trackToSourceMap = newSourceMap
+            )
+        }
+
+        val snapshot = ReplacementSnapshot(
+            previewIndex = context.previewIndex,
+            removedTrackId = context.originalTrackId,
+            removedTrack = context.originalTrack,
+            removedMatched = context.originalMatched,
+            removedSourcePlaylistId = context.sourcePlaylistId,
+            insertedTrackId = newId,
+            roundNumber = context.roundNumber
+        )
+
+        _state.update {
+            it.copy(
+                previewTracks = preview,
+                usedTrackIds = updatedUsed,
+                generationHistory = updatedHistory,
+                lastReplacement = snapshot
+            )
+        }
+
+        // Załaduj features dla nowego ID
+        loadFeaturesForCurrentPreview()
+    }
 
     fun removeTrackFromPreview(index: Int) {
         val tracks = _state.value.previewTracks?.toMutableList() ?: return
@@ -570,7 +981,8 @@ class GenerateViewModel @Inject constructor(
         _state.update {
             it.copy(
                 previewTracks = tracks.ifEmpty { null },
-                usedTrackIds = updatedUsedIds
+                usedTrackIds = updatedUsedIds,
+                lastReplacement = null // usunięcie unieważnia snapshot Undo
             )
         }
     }

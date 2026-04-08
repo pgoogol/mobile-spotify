@@ -6,8 +6,10 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,11 +19,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,12 +40,11 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -53,17 +56,18 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -71,6 +75,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -97,6 +102,7 @@ import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
 import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.TargetAction
+import com.spotify.playlistmanager.domain.usecase.FindReplacementsUseCase
 import com.spotify.playlistmanager.ui.components.EnergyCurveChart
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 import com.spotify.playlistmanager.util.toHoursMinutesSeconds
@@ -158,6 +164,29 @@ fun GenerateScreen(
     var showTargetPlaylistPicker by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Pokazuj snackbar z Undo po każdej wymianie
+    LaunchedEffect(state.lastReplacement) {
+        val snapshot = state.lastReplacement ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "Wymieniono \"${snapshot.removedTrack.title}\"",
+            actionLabel = "Cofnij",
+            withDismissAction = true
+        )
+        when (result) {
+            SnackbarResult.ActionPerformed -> viewModel.undoLastReplacement()
+            SnackbarResult.Dismissed -> viewModel.clearLastReplacement()
+        }
+    }
+
+    // Pokazuj błąd wymiany jako snackbar
+    LaunchedEffect(state.replacementState) {
+        val rs = state.replacementState
+        if (rs is ReplacementState.Error) {
+            snackbarHostState.showSnackbar(message = rs.message)
+            viewModel.cancelReplacement()
+        }
+    }
     LaunchedEffect(state.error) {
         state.error?.let {
             snackbarHostState.showSnackbar(it)
@@ -349,13 +378,18 @@ fun GenerateScreen(
                     val features = track.id?.let { featuresMap[it] }
                     val matched = track.id?.let { matchedLookup[it] }
                     val roundNumber = track.id?.let { trackToRound[it] }
+                    val isReplacing =
+                        (state.replacementState as? ReplacementState.Loading)?.previewIndex == index
                     PreviewTrackRow(
                         track = track,
                         features = features,
                         matched = matched,
                         roundNumber = roundNumber,
                         index = index + 1,
-                        onRemove = { viewModel.removeTrackFromPreview(index) }
+                        isReplacing = isReplacing,
+                        onRemove = { viewModel.removeTrackFromPreview(index) },
+                        onReplaceAuto = { viewModel.replaceTrackAuto(index) },
+                        onReplacePick = { viewModel.startReplacementPicker(index) }
                     )
                 }
             }
@@ -387,6 +421,15 @@ fun GenerateScreen(
             isAdding = state.isAddingToQueue,
             onConfirm = viewModel::confirmAddToQueue,
             onDismiss = viewModel::dismissQueueDryRun
+        )
+    }
+
+    (state.replacementState as? ReplacementState.Picking)?.let { picking ->
+        ReplacementPickerSheet(
+            state = picking,
+            featuresMap = featuresMap,
+            onPick = { viewModel.confirmReplacement(it) },
+            onDismiss = { viewModel.cancelReplacement() }
         )
     }
 }
@@ -834,6 +877,7 @@ private fun PlaylistNameField(
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PreviewTrackRow(
     track: Track,
@@ -841,7 +885,10 @@ private fun PreviewTrackRow(
     matched: MatchedTrack?,
     roundNumber: Int?,
     index: Int,
-    onRemove: () -> Unit
+    isReplacing: Boolean,
+    onRemove: () -> Unit,
+    onReplaceAuto: () -> Unit,
+    onReplacePick: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -935,6 +982,34 @@ private fun PreviewTrackRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
+
+            // Wymiana utworu — tap = auto, long-press = picker
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .combinedClickable(
+                        enabled = !isReplacing,
+                        onClick = onReplaceAuto,
+                        onLongClick = onReplacePick
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isReplacing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = SpotifyGreen
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.SwapHoriz,
+                        contentDescription = "Wymień utwór (długie naciśnięcie = wybierz)",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
 
             // Usuwanie
             IconButton(
@@ -1098,7 +1173,7 @@ private fun CurveMatchBar(matched: MatchedTrack) {
     val color = when {
         delta < 0.05f -> SpotifyGreen
         delta < 0.15f -> Color(0xFFFFA726) // amber
-        else          -> Color(0xFFE57373) // red
+        else -> Color(0xFFE57373) // red
     }
     val matchPct = ((1f - delta).coerceIn(0f, 1f) * 100f).toInt()
 
@@ -1113,7 +1188,11 @@ private fun CurveMatchBar(matched: MatchedTrack) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                "$matchPct%  (score ${"%.2f".format(matched.compositeScore)} / target ${"%.2f".format(matched.targetScore)})",
+                "$matchPct%  (score ${"%.2f".format(matched.compositeScore)} / target ${
+                    "%.2f".format(
+                        matched.targetScore
+                    )
+                })",
                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 color = color
             )
@@ -1263,6 +1342,188 @@ private fun GenerateBottomBar(
                             Text("Otwórz w Spotify")
                         }
                     }
+                }
+            }
+        }
+    }
+}
+// ══════════════════════════════════════════════════════════════════════
+//  Replacement Picker Bottom Sheet
+// ══════════════════════════════════════════════════════════════════════
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReplacementPickerSheet(
+    state: ReplacementState.Picking,
+    featuresMap: Map<String, TrackAudioFeatures>,
+    onPick: (FindReplacementsUseCase.ReplacementCandidate) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Text(
+                "Wymień utwór",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // Nagłówek: oryginalny utwór
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        "Zastępowany",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        state.originalTrack.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        state.originalTrack.artist,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Composite score: ${"%.2f".format(state.originalCompositeScore)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SpotifyGreen
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Kandydaci (posortowani wg dopasowania)",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(state.candidates, key = { it.track.id ?: it.track.title }) { candidate ->
+                    CandidateRow(
+                        candidate = candidate,
+                        features = candidate.track.id?.let { featuresMap[it] },
+                        onClick = { onPick(candidate) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun CandidateRow(
+    candidate: FindReplacementsUseCase.ReplacementCandidate,
+    features: TrackAudioFeatures?,
+    onClick: () -> Unit
+) {
+    val track = candidate.track
+
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Okładka
+            if (track.albumArtUrl != null) {
+                AsyncImage(
+                    model = track.albumArtUrl,
+                    contentDescription = track.album,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Tytuł + artysta + mini metadata
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    track.artist,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (features != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        MiniBadge(text = "${features.bpm.toInt()} BPM", accent = true)
+                        MiniBadge(text = features.camelot, accent = false)
+                        MiniBadge(text = "E ${features.energy.toInt()}", accent = false)
+                        MiniBadge(text = "D ${features.danceability.toInt()}", accent = false)
+                    }
+                }
+            }
+
+            // Score + delta
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    "%.2f".format(candidate.compositeScore),
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = SpotifyGreen
+                )
+                if (candidate.scoreDifference > 0f) {
+                    Text(
+                        "Δ ${"%.2f".format(candidate.scoreDifference)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
