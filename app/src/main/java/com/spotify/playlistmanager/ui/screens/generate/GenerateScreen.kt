@@ -4,7 +4,10 @@ package com.spotify.playlistmanager.ui.screens.generate
 
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +34,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MusicNote
@@ -75,6 +80,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -86,8 +92,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.Track
+import com.spotify.playlistmanager.data.model.TrackAudioFeatures
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
+import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.ui.components.EnergyCurveChart
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
@@ -98,8 +106,17 @@ fun GenerateScreen(
     onBack: () -> Unit, onTemplates: () -> Unit, viewModel: GenerateViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val featuresMap by viewModel.featuresMap.collectAsStateWithLifecycle()
+    val matchedLookup by viewModel.matchedTrackLookup.collectAsStateWithLifecycle()
     val templateCount by viewModel.templateCount.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val trackToRound = remember(state.generationHistory) {
+        buildMap<String, Int> {
+            for (round in state.generationHistory) {
+                for (id in round.trackIds) put(id, round.roundNumber)
+            }
+        }
+    }
 
     // Dialog przypinania utworów
     val pinningState = state.pinningState
@@ -329,14 +346,17 @@ fun GenerateScreen(
                 }
 
                 itemsIndexed(tracks, key = { i, t -> "${i}_${t.id}" }) { index, track ->
+                    val features = track.id?.let { featuresMap[it] }
+                    val matched = track.id?.let { matchedLookup[it] }
+                    val roundNumber = track.id?.let { trackToRound[it] }
                     PreviewTrackRow(
                         track = track,
+                        features = features,
+                        matched = matched,
+                        roundNumber = roundNumber,
                         index = index + 1,
-                        onRemove = { viewModel.removeTrackFromPreview(index) },
-                        onMoveUp = { if (index > 0) viewModel.moveTrack(index, index - 1) },
-                        onMoveDown = {
-                            if (index < tracks.lastIndex) viewModel.moveTrack(index, index + 1)
-                        })
+                        onRemove = { viewModel.removeTrackFromPreview(index) }
+                    )
                 }
             }
         }
@@ -816,100 +836,299 @@ private fun PlaylistNameField(
 
 @Composable
 private fun PreviewTrackRow(
-    track: Track, index: Int, onRemove: () -> Unit, onMoveUp: () -> Unit, onMoveDown: () -> Unit
+    track: Track,
+    features: TrackAudioFeatures?,
+    matched: MatchedTrack?,
+    roundNumber: Int?,
+    index: Int,
+    onRemove: () -> Unit
 ) {
-    Row(
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .clickable { expanded = !expanded }
+            .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        Text(
-            "$index",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(24.dp)
-        )
-
-// Okładka albumu
-        if (track.albumArtUrl != null) {
-            AsyncImage(
-                model = track.albumArtUrl,
-                contentDescription = track.album,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                contentScale = ContentScale.Crop
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Numer pozycji
+            Text(
+                "$index",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(24.dp)
             )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
+
+            // Okładka albumu
+            if (track.albumArtUrl != null) {
+                AsyncImage(
+                    model = track.albumArtUrl,
+                    contentDescription = track.album,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Tytuł / artysta / meta
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        track.artist,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Text(
+                        "·",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        track.formattedDuration(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Badge BPM (gdy dostępne features)
+            if (features != null) {
+                MiniBadge(text = "${features.bpm.toInt()} BPM", accent = true)
+            }
+
+            // Chevron rozwijania
+            Icon(
+                imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Zwiń" else "Rozwiń",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+
+            // Usuwanie
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(32.dp)
             ) {
                 Icon(
-                    Icons.Default.MusicNote,
-                    null,
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Usuń",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
 
-        Column(modifier = Modifier.weight(1f)) {
+        // ── Sekcja rozwijana ───────────────────────────────────────
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(),
+            exit = shrinkVertically()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 34.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)
+            ) {
+                if (features != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MiniBar(
+                            label = "BPM",
+                            value = features.bpm.toInt().toString(),
+                            progress = (features.bpm / 220f).coerceIn(0f, 1f),
+                            modifier = Modifier.weight(1f)
+                        )
+                        MiniBar(
+                            label = "Energy",
+                            value = features.energy.toInt().toString(),
+                            progress = features.energy / 100f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        MiniBar(
+                            label = "Dance",
+                            value = features.danceability.toInt().toString(),
+                            progress = features.danceability / 100f,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        MiniBadge(text = features.camelot, accent = false)
+                        MiniBadge(text = features.musicalKey, accent = false)
+                        MiniBadge(text = "Val ${features.valence.toInt()}", accent = false)
+                        MiniBadge(text = "Ac ${features.acousticness.toInt()}", accent = false)
+                    }
+
+                    // Pasek dopasowania do krzywej (tylko gdy była krzywa ≠ None)
+                    if (matched != null && matched.targetScore > 0f) {
+                        Spacer(Modifier.height(8.dp))
+                        CurveMatchBar(matched = matched)
+                    } else if (matched != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Composite score: ${"%.2f".format(matched.compositeScore)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Text(
+                        "Brak danych audio — zaimportuj CSV w Ustawieniach",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    track.releaseDate?.let {
+                        MiniBadge(text = "Wydano $it", accent = false)
+                    }
+                    roundNumber?.let {
+                        MiniBadge(text = "Runda $it", accent = false)
+                    }
+                    MiniBadge(text = "Pop ${track.popularity}", accent = false)
+                }
+            }
+        }
+    }
+}
+
+// ── Komponenty pomocnicze PreviewTrackRow ──────────────────────────────
+
+@Composable
+private fun MiniBadge(text: String, accent: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = if (accent) SpotifyGreen.copy(alpha = 0.18f)
+        else MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (accent) FontWeight.Bold else FontWeight.Normal
+            ),
+            color = if (accent) SpotifyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+@Composable
+private fun MiniBar(
+    label: String,
+    value: String,
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
             Text(
-                track.title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                "${track.artist} · ${track.album}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                track.formattedDuration(),
+                label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        }
-        Column {
-            IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.Default.KeyboardArrowUp,
-                    "W górę",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    "W dół",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
-            Icon(
-                Icons.Default.Close,
-                "Usuń",
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.error
+            Text(
+                value,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = SpotifyGreen
             )
         }
+        Spacer(Modifier.height(2.dp))
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = SpotifyGreen,
+            trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+        )
     }
-    HorizontalDivider(
-        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f),
-        modifier = Modifier.padding(start = 48.dp, end = 16.dp)
-    )
+}
+
+/**
+ * Pasek dopasowania do krzywej: pokazuje composite score utworu względem
+ * zaplanowanego target score. Zielony = bliskie dopasowanie (|delta| < 0.05),
+ * żółty = średnie (< 0.15), czerwony = słabe.
+ */
+@Composable
+private fun CurveMatchBar(matched: MatchedTrack) {
+    val delta = kotlin.math.abs(matched.compositeScore - matched.targetScore)
+    val color = when {
+        delta < 0.05f -> SpotifyGreen
+        delta < 0.15f -> Color(0xFFFFA726) // amber
+        else          -> Color(0xFFE57373) // red
+    }
+    val matchPct = ((1f - delta).coerceIn(0f, 1f) * 100f).toInt()
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "Dopasowanie do krzywej",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "$matchPct%  (score ${"%.2f".format(matched.compositeScore)} / target ${"%.2f".format(matched.targetScore)})",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = color
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        LinearProgressIndicator(
+            progress = { (1f - delta).coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = color,
+            trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+        )
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

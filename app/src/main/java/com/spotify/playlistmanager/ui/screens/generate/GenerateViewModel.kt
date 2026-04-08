@@ -6,22 +6,27 @@ import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
 import com.spotify.playlistmanager.data.model.Track
+import com.spotify.playlistmanager.data.model.TrackAudioFeatures
+import com.spotify.playlistmanager.domain.model.CompositeScoreCalculator
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
 import com.spotify.playlistmanager.domain.model.GenerateResult
 import com.spotify.playlistmanager.domain.model.GenerationRound
 import com.spotify.playlistmanager.domain.model.GeneratorTemplate
+import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.domain.model.TemplateSource
 import com.spotify.playlistmanager.domain.repository.CachePolicy
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -95,11 +100,34 @@ sealed class PinningState {
 class GenerateViewModel @Inject constructor(
     private val repository: ISpotifyRepository,
     private val generatePlaylist: GeneratePlaylistUseCase,
-    private val templateRepository: IGeneratorTemplateRepository
+    private val templateRepository: IGeneratorTemplateRepository,
+    private val featuresRepository: ITrackFeaturesRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(GenerateUiState())
     val state: StateFlow<GenerateUiState> = _state.asStateFlow()
+
+    /** Mapa audio features (trackId → features) dla utworów w podglądzie. */
+    private val _featuresMap = MutableStateFlow<Map<String, TrackAudioFeatures>>(emptyMap())
+    val featuresMap: StateFlow<Map<String, TrackAudioFeatures>> = _featuresMap.asStateFlow()
+
+    /**
+     * Szybki lookup MatchedTrack po trackId — agregowany ze wszystkich rund historii.
+     * Używany przez UI do wyświetlania targetScore i compositeScore per utwór.
+     */
+    val matchedTrackLookup: StateFlow<Map<String, MatchedTrack>> =
+        _state
+            .map { state ->
+                buildMap {
+                    for (round in state.generationHistory) {
+                        for (mt in round.matchedTracks) {
+                            val id = mt.track.id ?: continue
+                            put(id, mt)
+                        }
+                    }
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
 
     /** Szablony obserwowane reaktywnie. */
     val templates: StateFlow<List<GeneratorTemplate>> =
@@ -403,11 +431,13 @@ class GenerateViewModel @Inject constructor(
                     runningUsedIds = runningUsedIds + newIds
                     allNewTracks.addAll(newTracks)
 
+                    val roundMatched = result.generateResult.segments.flatMap { it.tracks }
                     val round = GenerationRound(
                         roundNumber = currentState.generationHistory.size + newRounds.size + 1,
                         templateName = templateName,
                         trackIds = newIds,
-                        tracks = newTracks
+                        tracks = newTracks,
+                        matchedTracks = roundMatched
                     )
                     newRounds.add(round)
 
@@ -436,11 +466,23 @@ class GenerateViewModel @Inject constructor(
                     runningUsedIds = runningUsedIds + newIds
                     allNewTracks.addAll(tracks)
 
+                    // Zbuduj MatchedTrack dla ścieżki no-curves:
+                    // composite score z features gdy dostępne, targetScore = 0f (brak krzywej)
+                    val noCurvesFeatures = featuresRepository.getFeaturesMap(newIds.toList())
+                    val roundMatched = tracks.map { track ->
+                        val score = track.id
+                            ?.let { noCurvesFeatures[it] }
+                            ?.let { CompositeScoreCalculator.calculate(it) }
+                            ?: CompositeScoreCalculator.DEFAULT_SCORE
+                        MatchedTrack(track = track, compositeScore = score, targetScore = 0f)
+                    }
+
                     val round = GenerationRound(
                         roundNumber = currentState.generationHistory.size + newRounds.size + 1,
                         templateName = templateName,
                         trackIds = newIds,
-                        tracks = tracks
+                        tracks = tracks,
+                        matchedTracks = roundMatched
                     )
                     newRounds.add(round)
                 }
@@ -464,6 +506,9 @@ class GenerateViewModel @Inject constructor(
                     isSessionActive = (it.generationHistory + newRounds).isNotEmpty()
                 )
             }
+
+            // Załaduj audio features dla podglądu (inkrementalnie)
+            loadFeaturesForCurrentPreview()
 
             // Komunikaty
             val completedRounds = newRounds.size
@@ -508,64 +553,8 @@ class GenerateViewModel @Inject constructor(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Cofanie ostatniego segmentu (Undo)
-    // ══════════════════════════════════════════════════════════════════════
-
-    fun undoLastSegment() {
-        val currentState = _state.value
-        val history = currentState.generationHistory
-        if (history.isEmpty()) return
-
-        val remainingHistory = history.dropLast(1)
-
-        // Przelicz usedTrackIds z pozostałych rund
-        val recalculatedUsedIds = remainingHistory
-            .flatMap { it.trackIds }
-            .toSet()
-
-        // Odbuduj podgląd z pozostałych rund
-        val recalculatedPreview = remainingHistory.flatMap { it.tracks }
-
-        _state.update {
-            it.copy(
-                usedTrackIds = recalculatedUsedIds,
-                generationHistory = remainingHistory,
-                previewTracks = recalculatedPreview.ifEmpty { null },
-                generateResult = null,
-                isSessionActive = remainingHistory.isNotEmpty()
-            )
-        }
-
-        // Odśwież statusy wyczerpania
-        refreshExhaustionStatuses()
-    }
-
-    private fun refreshExhaustionStatuses() {
-        val sources = _state.value.sources.filter { it.playlist != null }
-        if (sources.isEmpty()) return
-
-        viewModelScope.launch {
-            runCatching {
-                generatePlaylist.calculateExhaustionStatuses(
-                    sources = sources,
-                    usedTrackIds = _state.value.usedTrackIds
-                )
-            }.onSuccess { statuses ->
-                _state.update { it.copy(exhaustionStatuses = statuses) }
-            }
-        }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
     //  Zmiana kolejności / usuwanie w podglądzie
     // ══════════════════════════════════════════════════════════════════════
-
-    fun moveTrack(fromIndex: Int, toIndex: Int) {
-        val tracks = _state.value.previewTracks?.toMutableList() ?: return
-        val item = tracks.removeAt(fromIndex)
-        tracks.add(toIndex, item)
-        _state.update { it.copy(previewTracks = tracks) }
-    }
 
     fun removeTrackFromPreview(index: Int) {
         val tracks = _state.value.previewTracks?.toMutableList() ?: return
@@ -812,6 +801,33 @@ class GenerateViewModel @Inject constructor(
             sources.first().playlist?.name ?: "Szablon"
         } else {
             "${sources.size} źródeł"
+        }
+    }
+
+    /**
+     * Ładuje audio features dla wszystkich utworów w bieżącym podglądzie.
+     * Wywoływane po każdej operacji modyfikującej previewTracks.
+     * Różnica od TracksViewModel: robimy merge zamiast zastępowania, żeby
+     * nie tracić features między wywołaniami (np. po usunięciu jednego utworu
+     * nie trzeba ponownie fetchować pozostałych).
+     */
+    private fun loadFeaturesForCurrentPreview() {
+        val ids = _state.value.previewTracks
+            ?.mapNotNull { it.id }
+            ?.distinct()
+            ?: return
+        if (ids.isEmpty()) {
+            _featuresMap.value = emptyMap()
+            return
+        }
+        // Pobierz tylko brakujące
+        val missing = ids.filterNot { _featuresMap.value.containsKey(it) }
+        if (missing.isEmpty()) return
+        viewModelScope.launch {
+            runCatching { featuresRepository.getFeaturesMap(missing) }
+                .onSuccess { fresh ->
+                    _featuresMap.update { current -> current + fresh }
+                }
         }
     }
 }

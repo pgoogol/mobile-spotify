@@ -32,6 +32,12 @@ data class GenerationRound(
     val templateName: String,
     val trackIds: Set<String>,
     val tracks: List<Track>,
+    /**
+     * MatchedTrack (compositeScore + targetScore) per utwór.
+     * Pusta dla backward compatibility i dla rund bez krzywej energetycznej,
+     * gdy composite score nie został obliczony (np. stare dane z historii).
+     */
+    val matchedTracks: List<MatchedTrack> = emptyList(),
     val timestamp: Long = System.currentTimeMillis()
 )
 
