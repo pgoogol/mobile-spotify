@@ -124,20 +124,24 @@ fun GenerateScreen(
         }
     }
 
-    // Dialog przypinania utworów
+    // Dialog przypinania utworow (cross-playlist)
     val pinningState = state.pinningState
     if (pinningState is PinningState.Picking) {
         val pinSource = state.sources.find { it.id == pinningState.sourceId }
         if (pinSource != null) {
             PinTrackDialog(
-                tracks = pinningState.tracks,
-                currentPinned = pinSource.pinnedTracks,  // ← List<PinnedTrackInfo>
+                availablePlaylists = pinningState.availablePlaylists,
+                selectedPlaylistId = pinningState.selectedPlaylistId,
+                tracks = pinningState.currentTracks,
+                isLoadingTracks = pinningState.switchingPlaylist,
+                selectedTracks = pinningState.draftSelected,
                 maxSelection = pinSource.trackCount,
-                onConfirm = { selectedIds ->
-                    viewModel.setPinnedTracks(pinningState.sourceId, selectedIds)
-                    viewModel.closePinningDialog()
+                onPickPlaylist = viewModel::switchPinningPlaylist,
+                onToggleTrack = { track, fromPlaylistId ->
+                    viewModel.togglePinnedDraft(track, fromPlaylistId)
                 },
-                onRefresh = { viewModel.refreshPinningTracks(pinningState.sourceId) },
+                onConfirm = viewModel::confirmPinnedDraft,
+                onRefresh = viewModel::refreshPinningTracks,
                 onDismiss = viewModel::closePinningDialog
             )
         }
@@ -145,7 +149,7 @@ fun GenerateScreen(
     if (pinningState is PinningState.Loading) {
         AlertDialog(
             onDismissRequest = viewModel::closePinningDialog,
-            title = { Text("Ładowanie utworów…") },
+            title = { Text("Ladowanie playlist...") },
             text = {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = SpotifyGreen)

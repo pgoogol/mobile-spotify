@@ -192,11 +192,33 @@ data class TopArtist(
 
 /**
  * Informacje o przypiętym utworze — do wyświetlania w UI bez dodatkowego fetcha.
+ *
+ * Pola `sourcePlaylistId` i `fullTrack` pozwalają przypiąć utwór z DOWOLNEJ
+ * playlisty (nie tylko z playlisty źródłowej segmentu). Semantyka:
+ *
+ *  - sourcePlaylistId == null lub == source.playlist.id
+ *      → utwór pochodzi z playlisty źródłowej segmentu, fullTrack może być null
+ *        (use case wyłuska go z normalnego fetcha playlisty źródła)
+ *
+ *  - sourcePlaylistId != source.playlist.id
+ *      → utwór pochodzi z OBCEJ playlisty; fullTrack MUSI być wypełniony, bo
+ *        use case nie będzie fetchował obcej playlisty osobno
+ *
+ * `albumArtUrl` jest dodane głównie po to, żeby chipy w UI mogły wyświetlać
+ * miniaturę okładki bez sięgania do `fullTrack`.
  */
 data class PinnedTrackInfo(
     val id: String,
     val title: String,
-    val artist: String
+    val artist: String,
+    val albumArtUrl: String? = null,
+    /** ID playlisty źródłowej tego pinned tracka. Null = ze źródła segmentu (backward compat). */
+    val sourcePlaylistId: String? = null,
+    /**
+     * Pełny obiekt Track — wymagany gdy pinned pochodzi z innej playlisty niż źródło segmentu.
+     * Dla pinned ze źródła segmentu może być null (use case wyłuska z fetchTracks).
+     */
+    val fullTrack: Track? = null
 )
 
 data class PlaylistSource(

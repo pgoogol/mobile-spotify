@@ -98,14 +98,29 @@ data class GenerateUiState(
 
 /**
  * Stan dialogu przypinania utworów.
+ *
+ * Picking trzyma:
+ *  - liste dostepnych playlist do wyboru w pickerze (Liked + user playlists)
+ *  - aktualnie wyswietlana playliste (selectedPlaylistId)
+ *  - tracki tej playlisty (currentTracks)
+ *  - draftSelected: aktualnie wybrane pinned (CROSS-PLAYLIST!) — to "pre-commit"
+ *    stan, zatwierdzany dopiero przy onConfirm
+ *
+ * switchingPlaylist = true gdy ladujemy nowa playliste po przelaczeniu w pickerze
+ * (pokazuje spinner inline w dialogu zamiast zamykac i otwierac go ponownie)
  */
 sealed class PinningState {
     data object Idle : PinningState()
     data class Loading(val sourceId: String) : PinningState()
     data class Picking(
         val sourceId: String,
-        val tracks: List<Track>
+        val availablePlaylists: List<Playlist>,
+        val selectedPlaylistId: String,
+        val currentTracks: List<Track>,
+        val draftSelected: List<PinnedTrackInfo>,
+        val switchingPlaylist: Boolean = false
     ) : PinningState()
+
 }
 
 /**
@@ -284,9 +299,16 @@ class GenerateViewModel @Inject constructor(
                         updated.pinnedTracks.take(updated.trackCount)
                     else updated.pinnedTracks
 
-                    val finalPinned = if (src.playlist?.id != updated.playlist?.id)
-                        emptyList()
-                    else clampedPinned
+                    val finalPinned = if (src.playlist?.id != updated.playlist?.id) {
+                        // Zmieniono playliste zrodla segmentu — kasujemy pinned ze
+                        // STAREJ playlisty zrodla, ale pinned z innych playlist
+                        // przetrwuja (bo ich zrodlo to inna, niezmieniona playlista).
+                        val oldSourceId = src.playlist?.id
+                        clampedPinned.filter { pinned ->
+                            pinned.sourcePlaylistId != null &&
+                                    pinned.sourcePlaylistId != oldSourceId
+                        }
+                    } else clampedPinned
 
                     updated.copy(pinnedTracks = finalPinned)
                 } else src
@@ -295,91 +317,193 @@ class GenerateViewModel @Inject constructor(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    //  Pinned Tracks
+    //  Pinned Tracks (cross-playlist)
     // ══════════════════════════════════════════════════════════════════════
 
+    /**
+     * Otwiera dialog przypinania dla danego segmentu.
+     * Domyslnie wyswietla playliste zrodla segmentu (lub Liked jesli zrodlo jest puste).
+     * Zachowuje aktualnie pinned tracks segmentu jako draftSelected.
+     */
     fun openPinningDialog(sourceId: String) {
         val source = _state.value.sources.find { it.id == sourceId } ?: return
-        val playlistId = source.playlist?.id ?: return
+        val initialPlaylistId = source.playlist?.id
+            ?: GeneratePlaylistUseCase.LIKED_SONGS_ID
 
         viewModelScope.launch {
             _state.update { it.copy(pinningState = PinningState.Loading(sourceId)) }
-            runCatching {
-                // CACHE_FIRST: jeśli świeże, repository zwraca z Roomowego cache
-                // bez requestu sieciowego. Inaczej fetch + zapis cache w jednym kroku.
-                if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
-                    repository.getLikedTracks(CachePolicy.CACHE_FIRST)
-                else
-                    repository.getPlaylistTracks(playlistId, CachePolicy.CACHE_FIRST)
-            }.onSuccess { tracks ->
+
+            // Zaladuj liste playlist (CACHE_FIRST)
+            val playlists = runCatching {
+                repository.getUserPlaylists(CachePolicy.CACHE_FIRST)
+            }.getOrDefault(emptyList())
+
+            val likedPlaylist = Playlist(
+                id = GeneratePlaylistUseCase.LIKED_SONGS_ID,
+                name = "\u2764 Polubione utwory",
+                description = null,
+                imageUrl = null,
+                trackCount = 0,
+                ownerId = ""
+            )
+            val available = listOf(likedPlaylist) + playlists
+
+            // Zaladuj tracki dla domyslnej playlisty
+            val tracks = runCatching {
+                fetchTracksForPicker(initialPlaylistId, CachePolicy.CACHE_FIRST)
+            }.getOrElse { e ->
                 _state.update {
-                    it.copy(pinningState = PinningState.Picking(sourceId, tracks))
+                    it.copy(
+                        pinningState = PinningState.Idle,
+                        error = "Nie udalo sie pobrac utworow: ${e.message}"
+                    )
+                }
+                return@launch
+            }
+
+            _state.update {
+                it.copy(
+                    pinningState = PinningState.Picking(
+                        sourceId = sourceId,
+                        availablePlaylists = available,
+                        selectedPlaylistId = initialPlaylistId,
+                        currentTracks = tracks,
+                        draftSelected = source.pinnedTracks
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Wywolywane gdy user wybiera inna playliste w dropdownie pickera.
+     * Laduje tracki nowej playlisty bez resetowania draftSelected.
+     */
+    fun switchPinningPlaylist(playlistId: String) {
+        val current = _state.value.pinningState as? PinningState.Picking ?: return
+        if (current.selectedPlaylistId == playlistId) return
+
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    pinningState = current.copy(
+                        selectedPlaylistId = playlistId,
+                        currentTracks = emptyList(),
+                        switchingPlaylist = true
+                    )
+                )
+            }
+            runCatching {
+                fetchTracksForPicker(playlistId, CachePolicy.CACHE_FIRST)
+            }.onSuccess { tracks ->
+                val latest = _state.value.pinningState as? PinningState.Picking
+                if (latest != null && latest.sourceId == current.sourceId) {
+                    _state.update {
+                        it.copy(
+                            pinningState = latest.copy(
+                                currentTracks = tracks,
+                                switchingPlaylist = false
+                            )
+                        )
+                    }
                 }
             }.onFailure { e ->
                 _state.update {
                     it.copy(
-                        pinningState = PinningState.Idle,
-                        error = "Nie udało się pobrać utworów: ${e.message}"
+                        pinningState = current.copy(switchingPlaylist = false),
+                        error = "Nie udalo sie pobrac utworow: ${e.message}"
                     )
                 }
             }
         }
     }
 
-    fun refreshPinningTracks(sourceId: String) {
-        val source = _state.value.sources.find { it.id == sourceId } ?: return
-        val playlistId = source.playlist?.id ?: return
+    /** Wymusza fetch z sieci dla aktualnie wybranej playlisty w pickerze. */
+    fun refreshPinningTracks() {
+        val current = _state.value.pinningState as? PinningState.Picking ?: return
 
         viewModelScope.launch {
-            _state.update { it.copy(pinningState = PinningState.Loading(sourceId)) }
+            _state.update {
+                it.copy(pinningState = current.copy(switchingPlaylist = true))
+            }
             runCatching {
-                // NETWORK_ONLY: wymuszony refresh, omija cache.
-                // Repository i tak zaktualizuje cache po sukcesie.
-                if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID)
-                    repository.getLikedTracks(CachePolicy.NETWORK_ONLY)
-                else
-                    repository.getPlaylistTracks(playlistId, CachePolicy.NETWORK_ONLY)
+                fetchTracksForPicker(current.selectedPlaylistId, CachePolicy.NETWORK_ONLY)
             }.onSuccess { tracks ->
-                _state.update {
-                    it.copy(pinningState = PinningState.Picking(sourceId, tracks))
+                val latest = _state.value.pinningState as? PinningState.Picking
+                if (latest != null && latest.sourceId == current.sourceId) {
+                    _state.update {
+                        it.copy(
+                            pinningState = latest.copy(
+                                currentTracks = tracks,
+                                switchingPlaylist = false
+                            )
+                        )
+                    }
                 }
             }.onFailure { e ->
                 _state.update {
                     it.copy(
-                        pinningState = PinningState.Idle,
-                        error = "Nie udało się odświeżyć utworów: ${e.message}"
+                        pinningState = current.copy(switchingPlaylist = false),
+                        error = "Nie udalo sie odswiezyc utworow: ${e.message}"
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * Toggluje wybor utworu w biezacym dialogu.
+     * Trzyma sourcePlaylistId i fullTrack — zeby use case pozniej mogl uzyc
+     * pinned z obcej playlisty bez dodatkowego fetcha.
+     *
+     * Limit maxSelection (= source.trackCount) jest egzekwowany tutaj —
+     * jesli draft jest pelny, klik na nowy utwor jest no-op.
+     */
+    fun togglePinnedDraft(track: Track, fromPlaylistId: String) {
+        val current = _state.value.pinningState as? PinningState.Picking ?: return
+        val source = _state.value.sources.find { it.id == current.sourceId } ?: return
+        val trackId = track.id ?: return
+
+        val isAlready = current.draftSelected.any { it.id == trackId }
+        val newDraft = if (isAlready) {
+            current.draftSelected.filterNot { it.id == trackId }
+        } else {
+            if (current.draftSelected.size >= source.trackCount) return
+            current.draftSelected + PinnedTrackInfo(
+                id = trackId,
+                title = track.title,
+                artist = track.artist,
+                albumArtUrl = track.albumArtUrl,
+                sourcePlaylistId = fromPlaylistId,
+                fullTrack = track
+            )
+        }
+        _state.update {
+            it.copy(pinningState = current.copy(draftSelected = newDraft))
+        }
+    }
+
+    /** Zatwierdza draftSelected jako finalne pinned tracks dla segmentu. */
+    fun confirmPinnedDraft() {
+        val current = _state.value.pinningState as? PinningState.Picking ?: return
+        val sourceId = current.sourceId
+        val draft = current.draftSelected
+
+        _state.update { s ->
+            s.copy(
+                sources = s.sources.map { src ->
+                    if (src.id == sourceId) {
+                        val clamped = draft.take(src.trackCount)
+                        src.copy(pinnedTracks = clamped)
+                    } else src
+                },
+                pinningState = PinningState.Idle
+            )
         }
     }
 
     fun closePinningDialog() {
         _state.update { it.copy(pinningState = PinningState.Idle) }
-    }
-
-    fun setPinnedTracks(sourceId: String, trackIds: List<String>) {
-        val pinningState = _state.value.pinningState
-        // Pobierz pełne dane z listy tracków w dialogu
-        val tracksList = (pinningState as? PinningState.Picking)?.tracks ?: emptyList()
-        val tracksById = tracksList.associateBy { it.id }
-
-        _state.update { s ->
-            s.copy(sources = s.sources.map { src ->
-                if (src.id == sourceId) {
-                    val clamped = trackIds.take(src.trackCount)
-                    val pinnedInfos = clamped.mapNotNull { id ->
-                        val track = tracksById[id] ?: return@mapNotNull null
-                        PinnedTrackInfo(
-                            id = id,
-                            title = track.title,
-                            artist = track.artist
-                        )
-                    }
-                    src.copy(pinnedTracks = pinnedInfos)
-                } else src
-            })
-        }
     }
 
     fun removePinnedTrack(sourceId: String, trackId: String) {
@@ -390,6 +514,18 @@ class GenerateViewModel @Inject constructor(
                 else src
             })
         }
+    }
+
+    /**
+     * Helper: pobiera tracki dla pickera. Honoruje LIKED_SONGS_ID i CachePolicy.
+     */
+    private suspend fun fetchTracksForPicker(
+        playlistId: String,
+        policy: CachePolicy
+    ): List<Track> = if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID) {
+        repository.getLikedTracks(policy)
+    } else {
+        repository.getPlaylistTracks(playlistId, policy)
     }
 
     // ══════════════════════════════════════════════════════════════════════
