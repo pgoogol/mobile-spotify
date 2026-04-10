@@ -1,10 +1,11 @@
 package com.spotify.playlistmanager.domain.model
 
+import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.SortOption
 
 /**
  * Model domenowy szablonu konfiguracji generatora.
- * Nie zależy od Room — czysty Kotlin.
+ * Nie zalezy od Room — czysty Kotlin.
  */
 data class GeneratorTemplate(
     val id: Long = 0,
@@ -15,8 +16,13 @@ data class GeneratorTemplate(
 )
 
 /**
- * Segment (źródło) w szablonie — odpowiednik PlaylistSource
- * ale z trwałymi danymi (playlistId/name zamiast obiektów Playlist).
+ * Segment (zrodlo) w szablonie — odpowiednik PlaylistSource
+ * ale z trwalymi danymi (playlistId/name zamiast obiektow Playlist).
+ *
+ * pinnedTracks: lista przypietych utworow zachowana w templacie. Moga pochodzic
+ * z OBCYCH playlist (cross-playlist pinning) — w takim wypadku PinnedTrackInfo
+ * niesie sourcePlaylistId i fullTrack, dzieki czemu po zaladowaniu templatu
+ * utwory beda dostepne nawet jesli obca playlista nie jest aktualnie zaladowana.
  */
 data class TemplateSource(
     val position: Int,
@@ -24,5 +30,6 @@ data class TemplateSource(
     val playlistName: String,
     val trackCount: Int,
     val sortBy: SortOption = SortOption.NONE,
-    val energyCurve: EnergyCurve = EnergyCurve.None
+    val energyCurve: EnergyCurve = EnergyCurve.None,
+    val pinnedTracks: List<PinnedTrackInfo> = emptyList()
 )

@@ -1337,7 +1337,8 @@ class GenerateViewModel @Inject constructor(
                                 playlistName = src.playlist!!.name,
                                 trackCount = src.trackCount,
                                 sortBy = src.sortBy,
-                                energyCurve = src.energyCurve
+                                energyCurve = src.energyCurve,
+                                pinnedTracks = src.pinnedTracks
                             )
                         }
                     ))
@@ -1356,7 +1357,8 @@ class GenerateViewModel @Inject constructor(
                 playlist = playlist,
                 trackCount = src.trackCount,
                 sortBy = src.sortBy,
-                energyCurve = src.energyCurve
+                energyCurve = src.energyCurve,
+                pinnedTracks = src.pinnedTracks
             )
         }
         _state.update {

@@ -33,7 +33,8 @@ object DatabaseModule {
         Room.databaseBuilder(ctx, TrackFeaturesDatabase::class.java, "track_features.db")
             .addMigrations(
                 TrackFeaturesDatabase.MIGRATION_1_2,
-                TrackFeaturesDatabase.MIGRATION_2_3
+                TrackFeaturesDatabase.MIGRATION_2_3,
+                TrackFeaturesDatabase.MIGRATION_3_4
             )
             .build()
 

@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackEntity::class,
         PlaylistTrackCrossRef::class
     ],
-    version  = 3,
+    version  = 4,
     exportSchema = false
 )
 abstract class TrackFeaturesDatabase : RoomDatabase() {
@@ -121,6 +121,22 @@ abstract class TrackFeaturesDatabase : RoomDatabase() {
                     CREATE INDEX IF NOT EXISTS index_playlist_tracks_track_id
                     ON playlist_tracks(track_id)
                 """.trimIndent())
+            }
+        }
+
+        /**
+         * Migracja addytywna v3->v4.
+         * Dodaje kolumne pinned_tracks_json do tabeli template_sources
+         * — pozwala persystowac przypiete utwory w zapisanych templates
+         * (rowniez te pochodzace z OBCYCH playlist niz playlista zrodla segmentu).
+         *
+         * Stare wiersze dostaja NULL — brak pinned tracks, jak dotychczas.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE template_sources ADD COLUMN pinned_tracks_json TEXT"
+                )
             }
         }
     }

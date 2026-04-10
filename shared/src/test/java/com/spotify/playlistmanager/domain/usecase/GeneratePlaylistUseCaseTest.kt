@@ -48,6 +48,26 @@ class GeneratePlaylistUseCaseTest {
         uri = "spotify:track:$id"
     )
 
+    /**
+     * Helper do tworzenia Track z konkretnymi audio features (BPM/energia)
+     * — uzywany w testach pinned z obcej playlisty, gdzie chcemy kontrolowac
+     * gdzie pinned trafi w krzywej energii.
+     */
+    private fun makeTrackFull(
+        id: String,
+        title: String = "External $id",
+        artist: String = "Other Artist"
+    ) = Track(
+        id = id,
+        title = title,
+        artist = artist,
+        album = "Other Album",
+        albumArtUrl = null,
+        durationMs = 200_000,
+        popularity = 55,
+        uri = "spotify:track:$id"
+    )
+
     private fun makeFeatures(
         id: String, bpm: Float = 170f, energy: Float = 70f, danceability: Float = 65f
     ) = TrackAudioFeatures(
@@ -447,5 +467,167 @@ class GeneratePlaylistUseCaseTest {
         val result = useCase.generateWithCurves(listOf(source))
         val ids = result.generateResult.tracks.map { it.id }
         assertEquals("No duplicates", ids.size, ids.toSet().size)
+    }
+
+    // ── Cross-playlist pinned tracks ─────────────────────────────────────
+
+    @Test
+    fun `pinned z obcej playlisty trafia do segmentu mimo ze nie ma go w fetchTracks`() = runTest {
+        // Segment ma jako zrodlo playlistId="pl-1" (5 trackow t1..t5).
+        // Pinned to track "ext-1", ktorego NIE MA w pl-1 — pochodzi z playlisty "pl-other".
+        // fullTrack jest wypelniony, sourcePlaylistId = "pl-other".
+        // Oczekiwanie: ext-1 trafia do wynikow.
+        val externalTrack = makeTrackFull("ext-1", "External Hit")
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.None,
+            sortBy = SortOption.NONE,
+            pinnedTracks = listOf(
+                PinnedTrackInfo(
+                    id = "ext-1",
+                    title = externalTrack.title,
+                    artist = externalTrack.artist,
+                    albumArtUrl = null,
+                    sourcePlaylistId = "pl-other",
+                    fullTrack = externalTrack
+                )
+            )
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertTrue("ext-1 powinno znalezc sie w wynikach", "ext-1" in resultIds)
+        assertEquals(3, result.generateResult.tracks.size)
+    }
+
+    @Test
+    fun `cross-playlist pinned dziala z krzywa energii`() = runTest {
+        // Pinned z obcej playlisty trafia do segmentu z krzywa salsa romantica.
+        // ext-2 ma BPM 160 i energy 50 (mid range), wiec powinien dostac slot
+        // w polowie krzywej.
+        val externalTrack = makeTrackFull("ext-2", "Mid Energy External")
+        val featuresWithExternal = featuresMap +
+                ("ext-2" to makeFeatures("ext-2", bpm = 160f, energy = 50f, danceability = 60f))
+        val uc = GeneratePlaylistUseCase(
+            FakeRepository(tracksByPlaylist = mapOf(playlistId to tracks)),
+            FakeFeaturesRepository(featuresWithExternal)
+        )
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 4,
+            energyCurve = EnergyCurve.SalsaRomantica,
+            pinnedTracks = listOf(
+                PinnedTrackInfo(
+                    id = "ext-2",
+                    title = externalTrack.title,
+                    artist = externalTrack.artist,
+                    sourcePlaylistId = "pl-other",
+                    fullTrack = externalTrack
+                )
+            )
+        )
+        val result = uc.generateWithCurves(listOf(source))
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertTrue("ext-2 powinno trafic do segmentu z krzywa", "ext-2" in resultIds)
+        assertEquals(4, result.generateResult.tracks.size)
+    }
+
+    @Test
+    fun `pinned z obcej playlisty bez fullTrack zostaje pominiety`() = runTest {
+        // Defensywny test: gdy ktos podejrzanie zbuduje PinnedTrackInfo z
+        // sourcePlaylistId != source.id ALE bez fullTrack — use case nie ma jak
+        // odnalezc tracka i powinien po prostu go pominac (bez crashu).
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.None,
+            sortBy = SortOption.NONE,
+            pinnedTracks = listOf(
+                PinnedTrackInfo(
+                    id = "missing",
+                    title = "Ghost",
+                    artist = "Nobody",
+                    sourcePlaylistId = "pl-other",
+                    fullTrack = null  // ← brak danych, nie da sie wstawic
+                )
+            )
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertFalse("missing nie powinien znalezc sie w wynikach", "missing" in resultIds)
+        // Powinno wziac 3 normalne tracki z pl-1
+        assertEquals(3, result.generateResult.tracks.size)
+    }
+
+    @Test
+    fun `mix local pinned i external pinned w jednym segmencie`() = runTest {
+        // t1 jest pinned LOCAL (juz w pl-1).
+        // ext-3 jest pinned EXTERNAL (z innej playlisty).
+        // Oba powinny znalezc sie w wynikach.
+        val externalTrack = makeTrackFull("ext-3", "External Mix")
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 4,
+            energyCurve = EnergyCurve.None,
+            sortBy = SortOption.NONE,
+            pinnedTracks = listOf(
+                PinnedTrackInfo("t1", "Track A", "Artysta", sourcePlaylistId = playlistId),
+                PinnedTrackInfo(
+                    id = "ext-3",
+                    title = externalTrack.title,
+                    artist = externalTrack.artist,
+                    sourcePlaylistId = "pl-other",
+                    fullTrack = externalTrack
+                )
+            )
+        )
+        val result = useCase.generateWithCurves(listOf(source))
+        val resultIds = result.generateResult.tracks.map { it.id }
+        assertTrue("t1 (local pinned) powinien byc w wynikach", "t1" in resultIds)
+        assertTrue("ext-3 (external pinned) powinien byc w wynikach", "ext-3" in resultIds)
+        assertEquals(4, result.generateResult.tracks.size)
+    }
+
+    @Test
+    fun `external pinned nie wplywa na exhaustion playlisty zrodla`() = runTest {
+        // Segment chce 3 tracki, ma 1 external pinned + 2 z pl-1.
+        // Status wyczerpania powinien pokazac 2/5 (zuzyte z pl-1), nie 3/5.
+        val externalTrack = makeTrackFull("ext-4")
+        val source = PlaylistSource(
+            playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
+            trackCount = 3,
+            energyCurve = EnergyCurve.None,
+            sortBy = SortOption.NONE,
+            pinnedTracks = listOf(
+                PinnedTrackInfo(
+                    id = "ext-4",
+                    title = externalTrack.title,
+                    artist = externalTrack.artist,
+                    sourcePlaylistId = "pl-other",
+                    fullTrack = externalTrack
+                )
+            )
+        )
+        // Po pierwszej generacji exclusion list ma 1 external + 2 local.
+        // Druga generacja: status powinien liczyc tylko 2 zuzyte z pl-1.
+        val firstResult = useCase.generateWithCurves(listOf(source))
+        val firstUsedIds = firstResult.allGeneratedTrackIds
+
+        val secondResult = useCase.generateWithCurves(
+            listOf(source),
+            excludeTrackIds = firstUsedIds
+        )
+        // Z 5 trackow w pl-1 minus 2 uzyte = 3 dostepne, plus pinned (zawsze).
+        // Wiec drugie wywolanie wciaz zwroci 3 tracki (1 pinned + 2 nowe z pl-1).
+        assertEquals(3, secondResult.generateResult.tracks.size)
+        assertTrue("ext-4 znow w wynikach (pinned ignoruje exclude)",
+            "ext-4" in secondResult.generateResult.tracks.map { it.id })
+
+        // Status wyczerpania pl-1 powinien pokazac 2 zuzyte z 5 (nie 3)
+        val pl1Status = secondResult.exhaustionStatuses.find { it.playlistId == playlistId }
+        assertNotNull("Status pl-1 powinien istniec", pl1Status)
+        assertEquals(5, pl1Status!!.totalTracks)
+        assertEquals("Tylko 2 tracki z pl-1 sa zuzyte (ext-4 nie liczy sie)",
+            2, pl1Status.usedTracks)
     }
 }
