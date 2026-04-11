@@ -49,13 +49,14 @@ data class TemplateSourceEntity(
 
     /**
      * Typ krzywej energii — odpowiada @SerialName z EnergyCurve sealed class.
-     * Wartosci: "none", "salsa_romantica", "salsa_clasica", "salsa_rapida", "timba", "wave"
+     * Wartosci: "none", "salsa_romantica", "salsa_clasica", "salsa_rapida", "timba",
+     *           "bachata_rise", "bachata_arc", "crescendo", "peak", "wave"
      */
     @ColumnInfo(name = "curve_type")
     val curveType: String,
 
     /**
-     * Parametry krzywej (tylko dla Wave): JSON z direction i tracksPerHalfWave.
+     * Parametry krzywej (tylko dla Wave): JSON z direction, tracksPerHalfWave i center.
      * Dla pozostalych krzywych: null.
      */
     @ColumnInfo(name = "curve_params")

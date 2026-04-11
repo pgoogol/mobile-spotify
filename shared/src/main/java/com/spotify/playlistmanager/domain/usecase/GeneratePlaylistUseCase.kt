@@ -116,23 +116,19 @@ class GeneratePlaylistUseCase @Inject constructor(
             // Połącz: pinned (zawsze) + non-pinned (po filtrze exclude)
             val available = pinnedTracks + nonPinnedAvailable
 
-            // ── Status wyczerpania liczony WYŁĄCZNIE po playliście źródła ───
-            // Pinned z obcych playlist nie wpływają na exhaustion playlisty źródła.
-            val excludedNonPinnedFromSource = sourceTracks.count {
-                it.id in runningExclude && it.id !in pinnedIds
-            }
-            val status = ExhaustionStatus(
-                playlistId = playlistId,
-                playlistName = playlistName,
-                totalTracks = sourceTracks.size,
-                usedTracks = excludedNonPinnedFromSource
-            )
-
             if (available.isEmpty()) {
-                exhaustedPlaylists.add(status.copy(usedTracks = sourceTracks.size))
-                exhaustionStatuses.add(status.copy(usedTracks = sourceTracks.size))
+                val emptyStatus = ExhaustionStatus(
+                    playlistId = playlistId,
+                    playlistName = playlistName,
+                    totalTracks = sourceTracks.size,
+                    usedTracks = sourceTracks.size
+                )
+                exhaustedPlaylists.add(emptyStatus)
+                exhaustionStatuses.add(emptyStatus)
                 continue
             }
+
+            val takenIds: Set<String>
 
             if (source.energyCurve is EnergyCurve.None) {
                 // Pinned na początku, reszta sortowana
@@ -141,7 +137,7 @@ class GeneratePlaylistUseCase @Inject constructor(
                 allTracks.addAll(taken)
 
                 // Aktualizuj running exclusion
-                val takenIds = taken.mapNotNull { it.id }.toSet()
+                takenIds = taken.mapNotNull { it.id }.toSet()
                 newlyUsedIds.addAll(takenIds)
                 runningExclude.addAll(takenIds)
 
@@ -175,13 +171,26 @@ class GeneratePlaylistUseCase @Inject constructor(
                 allSegments.add(segment)
                 allTracks.addAll(segment.tracks.map { it.track })
 
-                val takenIds = segment.tracks.mapNotNull { it.track.id }.toSet()
+                takenIds = segment.tracks.mapNotNull { it.track.id }.toSet()
                 newlyUsedIds.addAll(takenIds)
                 runningExclude.addAll(takenIds)
                 prevLastScore = segment.lastScore
             }
 
-            exhaustionStatuses.add(status)
+            // ── Status wyczerpania liczony WYŁĄCZNIE po playliście źródła ───
+            // usedTracks = ile tracków z playlisty źródła zostało wziętych
+            // w bieżącym segmencie (external pinned się nie liczą, bo ich ID
+            // nie występują w sourceTracks).
+            val sourceTrackIds = sourceTracks.mapNotNull { it.id }.toSet()
+            val usedFromSource = takenIds.count { it in sourceTrackIds }
+            exhaustionStatuses.add(
+                ExhaustionStatus(
+                    playlistId = playlistId,
+                    playlistName = playlistName,
+                    totalTracks = sourceTracks.size,
+                    usedTracks = usedFromSource
+                )
+            )
         }
 
         val overallMatch =

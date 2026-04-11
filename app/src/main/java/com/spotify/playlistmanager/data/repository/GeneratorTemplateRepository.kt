@@ -116,9 +116,14 @@ class GeneratorTemplateRepository @Inject constructor(
             is EnergyCurve.SalsaClasica   -> "salsa_clasica" to null
             is EnergyCurve.SalsaRapida    -> "salsa_rapida" to null
             is EnergyCurve.Timba          -> "timba" to null
+            is EnergyCurve.BachataRise    -> "bachata_rise" to null
+            is EnergyCurve.BachataArc     -> "bachata_arc" to null
+            is EnergyCurve.Crescendo      -> "crescendo" to null
+            is EnergyCurve.Peak           -> "peak" to null
             is EnergyCurve.Wave           -> "wave" to JSONObject().apply {
                 put("direction", curve.direction.name.lowercase())
                 put("tracksPerHalfWave", curve.tracksPerHalfWave)
+                put("center", curve.center.toDouble())
             }.toString()
         }
 
@@ -128,15 +133,23 @@ class GeneratorTemplateRepository @Inject constructor(
             "salsa_clasica" -> EnergyCurve.SalsaClasica
             "salsa_rapida" -> EnergyCurve.SalsaRapida
             "timba" -> EnergyCurve.Timba
+            "bachata_rise" -> EnergyCurve.BachataRise
+            "bachata_arc" -> EnergyCurve.BachataArc
+            "crescendo" -> EnergyCurve.Crescendo
+            "peak" -> EnergyCurve.Peak
             "wave" -> {
                 if (params == null) EnergyCurve.None
                 else runCatching {
                     val obj = JSONObject(params)
                     val dir = obj.optString("direction", "rising")
                     val tphw = obj.optInt("tracksPerHalfWave", 3)
+                    // Wsteczna kompatybilność: stare zapisy nie mają "center" —
+                    // optDouble z defaultem daje 0.50f (obecne zachowanie)
+                    val center = obj.optDouble("center", EnergyCurve.Wave.CENTER_UNIVERSAL.toDouble()).toFloat()
                     EnergyCurve.Wave(
                         direction = WaveDirection.valueOf(dir.uppercase()),
-                        tracksPerHalfWave = tphw
+                        tracksPerHalfWave = tphw,
+                        center = center
                     )
                 }.getOrDefault(EnergyCurve.None)
             }
