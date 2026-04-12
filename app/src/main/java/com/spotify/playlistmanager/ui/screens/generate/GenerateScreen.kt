@@ -322,9 +322,13 @@ fun GenerateScreen(
                 }
             } else {
                 itemsIndexed(state.sources, key = { _, s -> s.id }) { _, source ->
+                    val genres = remember(featuresMap) { GenreExtractor.extractGenres(featuresMap) }
+                    val labels = remember(featuresMap) { GenreExtractor.extractLabels(featuresMap) }
                     PlaylistSourceCard(
                         source = source,
                         availablePlaylists = state.availablePlaylists,
+                        availableGenres = genres,
+                        availableLabels = labels,
                         onUpdate = viewModel::updateSource,
                         onRemove = { viewModel.removeSource(source.id) },
                         canRemove = state.sources.size > 1,

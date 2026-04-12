@@ -9,35 +9,21 @@ import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.EnergyCurveCalculator
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
 import com.spotify.playlistmanager.domain.model.GenerateResult
+import com.spotify.playlistmanager.domain.model.HarmonicOptimizer
 import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.SegmentMatchResult
+import com.spotify.playlistmanager.domain.model.TrackFilter
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Use-case generowania playlisty z obsługą krzywych energii.
- *
- * Algorytm dla każdego segmentu (PlaylistSource):
- *  1. Pobierz wszystkie utwory z playlisty źródłowej
- *  2. Dołóż pinned tracks z OBCYCH playlist (jeśli są w source.pinnedTracks)
- *  3. Odfiltruj już użyte utwory (excludeTrackIds), z wyłączeniem pinned
- *  4. Jeśli krzywa = None → sortuj wg SortOption i weź N
- *  5. Jeśli krzywa ≠ None → pobierz audio features z cache,
- *     dopasuj greedy algorytmem do krzywej
- *
- * Smooth Join: opcjonalnie wygładza przejścia między segmentami.
- */
 @Singleton
 class GeneratePlaylistUseCase @Inject constructor(
     private val repository: ISpotifyRepository,
     private val featuresRepository: ITrackFeaturesRepository
 ) {
 
-    /**
-     * Wynik generowania rozszerzony o informację o wyczerpaniu.
-     */
     data class GenerateWithExhaustionResult(
         val generateResult: GenerateResult,
         val exhaustedPlaylists: List<ExhaustionStatus>,
@@ -46,8 +32,7 @@ class GeneratePlaylistUseCase @Inject constructor(
     )
 
     /**
-     * Backward-compat invoke — używa SortOption, bez krzywych energii.
-     * Pinned tracks z OBCYCH playlist również są tu uwzględniane.
+     * Backward-compat invoke — SortOption, bez krzywych energii.
      */
     suspend operator fun invoke(
         sources: List<PlaylistSource>,
@@ -61,13 +46,15 @@ class GeneratePlaylistUseCase @Inject constructor(
             val sourceTracks = fetchTracks(playlistId)
             val allTracks = mergePinnedFromExternalPlaylists(sourceTracks, source, playlistId)
 
+            // ── Filtrowanie po gatunkach/wytwórniach ──────────────────────
+            val filteredTracks = applyGenreAndLabelFilter(allTracks, source)
+
             val pinnedIds = source.pinnedTracks.map { it.id }.toSet()
-            val pinnedTracks = allTracks.filter { it.id in pinnedIds }
-            val nonPinned = allTracks.filter {
+            val pinnedTracks = filteredTracks.filter { it.id in pinnedIds }
+            val nonPinned = filteredTracks.filter {
                 it.id !in pinnedIds && it.id !in runningExclude
             }
 
-            // Pinned na początku, reszta wg SortOption
             val sorted = pinnedTracks + applySorting(nonPinned, source.sortBy)
             val taken = sorted.take(source.trackCount)
             result.addAll(taken)
@@ -78,11 +65,7 @@ class GeneratePlaylistUseCase @Inject constructor(
     }
 
     /**
-     * Generuje playlistę z krzywymi energii i obsługą deduplikacji.
-     *
-     * @param sources segmenty z konfiguracją
-     * @param smoothJoin czy wygładzać przejścia między segmentami
-     * @param excludeTrackIds zbiór ID utworów do pominięcia (globalna deduplikacja)
+     * Generuje playlistę z krzywymi energii, filtrowaniem i opcjonalnym harmonic mixing.
      */
     suspend fun generateWithCurves(
         sources: List<PlaylistSource>,
@@ -96,7 +79,6 @@ class GeneratePlaylistUseCase @Inject constructor(
         val exhaustedPlaylists = mutableListOf<ExhaustionStatus>()
         var prevLastScore: Float? = null
 
-        // Łączona exclusion lista: zewnętrzna + wewnątrz-generacyjna
         val runningExclude = excludeTrackIds.toMutableSet()
 
         for (source in sources) {
@@ -104,16 +86,16 @@ class GeneratePlaylistUseCase @Inject constructor(
             val playlistName = source.playlist?.name ?: "?"
 
             val sourceTracks = fetchTracks(playlistId)
-            // Dokleja pinned z obcych playlist do puli, z której wybieramy
             val allPlaylistTracks = mergePinnedFromExternalPlaylists(sourceTracks, source, playlistId)
 
-            // Pinned tracks ignorują excludeTrackIds (deduplikacja sesyjna)
+            // ── Filtrowanie po gatunkach/wytwórniach ──────────────────────
+            val filteredAll = applyGenreAndLabelFilter(allPlaylistTracks, source)
+
             val pinnedIds = source.pinnedTracks.map { it.id }.toSet()
-            val pinnedTracks = allPlaylistTracks.filter { it.id in pinnedIds }
-            val nonPinnedAvailable = allPlaylistTracks.filter {
+            val pinnedTracks = filteredAll.filter { it.id in pinnedIds }
+            val nonPinnedAvailable = filteredAll.filter {
                 it.id !in runningExclude && it.id !in pinnedIds
             }
-            // Połącz: pinned (zawsze) + non-pinned (po filtrze exclude)
             val available = pinnedTracks + nonPinnedAvailable
 
             if (available.isEmpty()) {
@@ -131,12 +113,10 @@ class GeneratePlaylistUseCase @Inject constructor(
             val takenIds: Set<String>
 
             if (source.energyCurve is EnergyCurve.None) {
-                // Pinned na początku, reszta sortowana
                 val sorted = pinnedTracks + applySorting(nonPinnedAvailable, source.sortBy)
                 val taken = sorted.take(source.trackCount)
                 allTracks.addAll(taken)
 
-                // Aktualizuj running exclusion
                 takenIds = taken.mapNotNull { it.id }.toSet()
                 newlyUsedIds.addAll(takenIds)
                 runningExclude.addAll(takenIds)
@@ -157,7 +137,6 @@ class GeneratePlaylistUseCase @Inject constructor(
                     )
                 )
             } else {
-                // Krzywa ≠ None — deleguj do EnergyCurveCalculator
                 val featuresMap = loadFeaturesMap(available)
                 val segment = EnergyCurveCalculator.matchTracks(
                     tracks = available,
@@ -168,19 +147,24 @@ class GeneratePlaylistUseCase @Inject constructor(
                     smoothJoin = smoothJoin,
                     prevLastScore = prevLastScore
                 )
-                allSegments.add(segment)
-                allTracks.addAll(segment.tracks.map { it.track })
 
-                takenIds = segment.tracks.mapNotNull { it.track.id }.toSet()
+                // ── Optymalizacja harmoniczna (opcjonalna) ────────────────
+                val finalSegment = if (source.harmonicMixing && segment.tracks.size > 2) {
+                    val optimized = HarmonicOptimizer.optimize(segment.tracks, featuresMap)
+                    segment.copy(tracks = optimized)
+                } else {
+                    segment
+                }
+
+                allSegments.add(finalSegment)
+                allTracks.addAll(finalSegment.tracks.map { it.track })
+
+                takenIds = finalSegment.tracks.mapNotNull { it.track.id }.toSet()
                 newlyUsedIds.addAll(takenIds)
                 runningExclude.addAll(takenIds)
-                prevLastScore = segment.lastScore
+                prevLastScore = finalSegment.lastScore
             }
 
-            // ── Status wyczerpania liczony WYŁĄCZNIE po playliście źródła ───
-            // usedTracks = ile tracków z playlisty źródła zostało wziętych
-            // w bieżącym segmencie (external pinned się nie liczą, bo ich ID
-            // nie występują w sourceTracks).
             val sourceTrackIds = sourceTracks.mapNotNull { it.id }.toSet()
             val usedFromSource = takenIds.count { it in sourceTrackIds }
             exhaustionStatuses.add(
@@ -209,9 +193,6 @@ class GeneratePlaylistUseCase @Inject constructor(
         )
     }
 
-    /**
-     * Oblicza status wyczerpania dla podanych playlist źródłowych.
-     */
     suspend fun calculateExhaustionStatuses(
         sources: List<PlaylistSource>,
         usedTrackIds: Set<String>
@@ -236,13 +217,6 @@ class GeneratePlaylistUseCase @Inject constructor(
         if (playlistId == LIKED_SONGS_ID) repository.getLikedTracks()
         else repository.getPlaylistTracks(playlistId)
 
-    /**
-     * Dokleja do listy `sourceTracks` te pinned utwory, które pochodzą
-     * z OBCYCH playlist (sourcePlaylistId != segmentPlaylistId i fullTrack != null).
-     *
-     * Pinned utwory pochodzące z playlisty źródła segmentu są już w sourceTracks
-     * — nie dublujemy. Dedup po Track.id.
-     */
     private fun mergePinnedFromExternalPlaylists(
         sourceTracks: List<Track>,
         source: PlaylistSource,
@@ -266,6 +240,30 @@ class GeneratePlaylistUseCase @Inject constructor(
         else sourceTracks + externalPinned
     }
 
+    /**
+     * Aplikuje filtry gatunków i wytwórni z PlaylistSource.
+     * Jeśli wszystkie filtry puste — zwraca oryginalną listę (fast path).
+     */
+    private suspend fun applyGenreAndLabelFilter(
+        tracks: List<Track>,
+        source: PlaylistSource
+    ): List<Track> {
+        if (source.includeGenres.isEmpty() && source.excludeGenres.isEmpty() &&
+            source.includeLabels.isEmpty() && source.excludeLabels.isEmpty()
+        ) {
+            return tracks
+        }
+        val featuresMap = loadFeaturesMap(tracks)
+        return TrackFilter.apply(
+            tracks = tracks,
+            featuresMap = featuresMap,
+            includeGenres = source.includeGenres,
+            excludeGenres = source.excludeGenres,
+            includeLabels = source.includeLabels,
+            excludeLabels = source.excludeLabels
+        )
+    }
+
     private suspend fun loadFeaturesMap(tracks: List<Track>): Map<String, TrackAudioFeatures> =
         featuresRepository.getFeaturesMap(tracks.mapNotNull { it.id })
 
@@ -273,7 +271,7 @@ class GeneratePlaylistUseCase @Inject constructor(
         when (option) {
             SortOption.POPULARITY -> tracks.sortedByDescending { it.popularity }
             SortOption.DURATION -> tracks.sortedBy { it.durationMs }
-            SortOption.RELEASE_DATE -> tracks.sortedByDescending { it.album }
+            SortOption.RELEASE_DATE -> tracks.sortedByDescending { it.releaseDate ?: "" }
             SortOption.NONE -> tracks
         }
 

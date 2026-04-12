@@ -22,12 +22,6 @@ data class SpotifyPlaylist(
     val tracks: TracksRef,
     val owner: SpotifyOwner,
     val public: Boolean?,
-    /**
-     * Identyfikator stanu playlisty — zmienia się gdy ktoś edytuje
-     * (dodaje/usuwa/zmienia kolejność utworów). Używany do walidacji
-     * cache bez pełnego refetcha utworów.
-     * Null dla Liked Songs (nie mają snapshot_id).
-     */
     val snapshot_id: String? = null
 )
 
@@ -35,10 +29,6 @@ data class SpotifyOwner(val id: String, val display_name: String?)
 data class SpotifyImage(val url: String, val height: Int?, val width: Int?)
 data class TracksRef(val href: String, val total: Int)
 
-/**
- * Tania odpowiedź dla walidacji cache — tylko snapshot_id.
- * Używana przez GET /v1/playlists/{id}?fields=snapshot_id.
- */
 data class PlaylistSnapshotResponse(
     val snapshot_id: String?
 )
@@ -148,10 +138,6 @@ data class Playlist(
     val imageUrl: String?,
     val trackCount: Int,
     val ownerId: String,
-    /**
-     * Snapshot ID z Spotify API — zmienia się przy edycji playlisty.
-     * Nullable dla kompatybilności (Liked Songs, ręcznie tworzone Playlist w UI).
-     */
     val snapshotId: String? = null
 )
 
@@ -190,34 +176,12 @@ data class TopArtist(
 //  Modele generatora playlist
 // ════════════════════════════════════════════════════════════
 
-/**
- * Informacje o przypiętym utworze — do wyświetlania w UI bez dodatkowego fetcha.
- *
- * Pola `sourcePlaylistId` i `fullTrack` pozwalają przypiąć utwór z DOWOLNEJ
- * playlisty (nie tylko z playlisty źródłowej segmentu). Semantyka:
- *
- *  - sourcePlaylistId == null lub == source.playlist.id
- *      → utwór pochodzi z playlisty źródłowej segmentu, fullTrack może być null
- *        (use case wyłuska go z normalnego fetcha playlisty źródła)
- *
- *  - sourcePlaylistId != source.playlist.id
- *      → utwór pochodzi z OBCEJ playlisty; fullTrack MUSI być wypełniony, bo
- *        use case nie będzie fetchował obcej playlisty osobno
- *
- * `albumArtUrl` jest dodane głównie po to, żeby chipy w UI mogły wyświetlać
- * miniaturę okładki bez sięgania do `fullTrack`.
- */
 data class PinnedTrackInfo(
     val id: String,
     val title: String,
     val artist: String,
     val albumArtUrl: String? = null,
-    /** ID playlisty źródłowej tego pinned tracka. Null = ze źródła segmentu (backward compat). */
     val sourcePlaylistId: String? = null,
-    /**
-     * Pełny obiekt Track — wymagany gdy pinned pochodzi z innej playlisty niż źródło segmentu.
-     * Dla pinned ze źródła segmentu może być null (use case wyłuska z fetchTracks).
-     */
     val fullTrack: Track? = null
 )
 
@@ -227,14 +191,19 @@ data class PlaylistSource(
     val trackCount: Int = 10,
     val sortBy: SortOption = SortOption.NONE,
     val energyCurve: EnergyCurve = EnergyCurve.None,
-    val pinnedTracks: List<PinnedTrackInfo> = emptyList()
+    val pinnedTracks: List<PinnedTrackInfo> = emptyList(),
+    /** Czy zastosować optymalizację harmoniczną (Camelot Wheel) po dopasowaniu do krzywej. */
+    val harmonicMixing: Boolean = false,
+    /** Whitelist gatunków — puste = brak filtra. Case-insensitive contains. */
+    val includeGenres: Set<String> = emptySet(),
+    /** Blacklist gatunków — puste = brak filtra. */
+    val excludeGenres: Set<String> = emptySet(),
+    /** Whitelist wytwórni — puste = brak filtra. */
+    val includeLabels: Set<String> = emptySet(),
+    /** Blacklist wytwórni — puste = brak filtra. */
+    val excludeLabels: Set<String> = emptySet()
 )
 
-/**
- * Generuje prosty unikalny identyfikator bez java.util.UUID.
- * Format: 16 losowych bajtów jako hex — wystarczający dla identyfikatorów
- * sesji UI (nie musi być globalnie unikalny jak RFC-4122 UUID).
- */
 private fun randomId(): String =
     ByteArray(16)
         .also { kotlin.random.Random.Default.nextBytes(it) }

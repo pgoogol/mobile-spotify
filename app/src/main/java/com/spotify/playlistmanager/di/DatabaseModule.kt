@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import coil.annotation.ExperimentalCoilApi
 import com.spotify.playlistmanager.data.cache.CoilImageCacheCleaner
+import com.spotify.playlistmanager.data.cache.CoilImagePreloader
 import com.spotify.playlistmanager.data.cache.GeneratorTemplateDao
 import com.spotify.playlistmanager.data.cache.PlaylistCacheDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
@@ -12,6 +13,7 @@ import com.spotify.playlistmanager.data.repository.GeneratorTemplateRepository
 import com.spotify.playlistmanager.data.repository.PlaylistCacheRepository
 import com.spotify.playlistmanager.data.repository.TrackFeaturesRepository
 import com.spotify.playlistmanager.domain.cache.IImageCacheCleaner
+import com.spotify.playlistmanager.domain.cache.IImagePreloader
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
 import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
@@ -82,4 +84,10 @@ abstract class DatabaseBindings {
     abstract fun bindImageCacheCleaner(
         impl: CoilImageCacheCleaner
     ): IImageCacheCleaner
+
+    @Binds
+    @Singleton
+    abstract fun bindImagePreloader(
+        impl: CoilImagePreloader
+    ): IImagePreloader
 }

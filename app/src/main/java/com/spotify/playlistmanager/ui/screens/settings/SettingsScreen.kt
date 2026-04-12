@@ -61,6 +61,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val offlineProgress by viewModel.offlineProgress.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(state.actionMessage) {
@@ -144,6 +145,13 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            // ── Tryb offline ─────────────────────────────────────────────
+            OfflinePrepSection(
+                progress = offlineProgress,
+                onPrepareAll = { viewModel.prepareOffline() },
+                onCancel = { viewModel.cancelOfflinePrep() }
+            )
 
             // ── O aplikacji ──────────────────────────────────────────────
             SettingsSection(title = "O aplikacji") {

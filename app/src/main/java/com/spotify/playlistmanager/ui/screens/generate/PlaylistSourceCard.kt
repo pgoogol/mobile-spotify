@@ -13,11 +13,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -35,6 +38,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -67,12 +72,17 @@ import com.spotify.playlistmanager.ui.theme.SpotifyGreen
  * - Dropdown krzywej energii + miniaturka Canvas 48dp
  * - AnimatedVisibility: konfiguracja Wave (kierunek + stepper N)
  * - AnimatedVisibility: sortowanie (widoczne tylko gdy krzywa = None)
+ * - Harmonic Mixing toggle (widoczny tylko gdy krzywa ≠ None)
+ * - Filtry gatunków i wytwórni (widoczne gdy playlista wybrana)
+ * - Pinned tracks z obsługą cross-playlist
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistSourceCard(
     source: PlaylistSource,
     availablePlaylists: List<Playlist>,
+    availableGenres: List<String>,
+    availableLabels: List<String>,
     onUpdate: (PlaylistSource) -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
@@ -83,9 +93,9 @@ fun PlaylistSourceCard(
     var playlistExpanded by remember { mutableStateOf(false) }
     var curveExpanded by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
+    var showGenreDialog by remember { mutableStateOf(false) }
+    var showLabelDialog by remember { mutableStateOf(false) }
 
-    // Stan zwijania grup w dropdownie krzywej — domyślnie wszystkie rozwinięte.
-    // NONE nie jest w secie bo "Brak" renderujemy bez nagłówka grupy.
     var expandedGroups by remember {
         mutableStateOf(setOf(CurveGroup.SALSA, CurveGroup.BACHATA, CurveGroup.UNIVERSAL))
     }
@@ -154,14 +164,12 @@ fun PlaylistSourceCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Stepper
                 TrackCountStepper(
                     count = source.trackCount,
                     onCountChange = { onUpdate(source.copy(trackCount = it)) },
                     modifier = Modifier.width(110.dp)
                 )
 
-                // Dropdown krzywej energii
                 ExposedDropdownMenuBox(
                     expanded = curveExpanded,
                     onExpandedChange = { curveExpanded = it },
@@ -184,7 +192,6 @@ fun PlaylistSourceCard(
                     ) {
                         EnergyCurve.groupedPresets.entries.forEachIndexed { groupIdx, (group, curves) ->
                             if (group == CurveGroup.NONE) {
-                                // "Brak" — bez nagłówka grupy, od razu jako pozycja
                                 curves.forEach { preset ->
                                     DropdownMenuItem(
                                         text = { Text(preset.displayName) },
@@ -195,12 +202,10 @@ fun PlaylistSourceCard(
                                     )
                                 }
                             } else {
-                                // Divider przed każdą grupą (oprócz pierwszej widocznej po "Brak")
                                 if (groupIdx > 0) {
                                     HorizontalDivider()
                                 }
                                 val isExpanded = group in expandedGroups
-                                // Nagłówek grupy — klikalny, przełącza isExpanded
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -230,7 +235,6 @@ fun PlaylistSourceCard(
                                         }
                                     }
                                 )
-                                // Elementy grupy — tylko jeśli rozwinięta
                                 if (isExpanded) {
                                     curves.forEach { preset ->
                                         DropdownMenuItem(
@@ -252,7 +256,6 @@ fun PlaylistSourceCard(
                     }
                 }
 
-                // Miniaturka Canvas 48dp
                 if (source.energyCurve !is EnergyCurve.None) {
                     CurveMiniPreview(
                         curve = source.energyCurve,
@@ -262,7 +265,7 @@ fun PlaylistSourceCard(
                 }
             }
 
-            // ── Konfiguracja Wave (AnimatedVisibility) ──────────────────
+            // ── Konfiguracja Wave ───────────────────────────────────────
             AnimatedVisibility(visible = source.energyCurve is EnergyCurve.Wave) {
                 val wave = source.energyCurve as? EnergyCurve.Wave ?: return@AnimatedVisibility
                 WaveConfiguration(
@@ -272,7 +275,7 @@ fun PlaylistSourceCard(
                 )
             }
 
-            // ── Sortowanie (widoczne tylko gdy krzywa = None) ────────────
+            // ── Sortowanie (tylko gdy krzywa = None) ────────────────────
             AnimatedVisibility(visible = source.energyCurve is EnergyCurve.None) {
                 ExposedDropdownMenuBox(
                     expanded = sortExpanded,
@@ -307,6 +310,74 @@ fun PlaylistSourceCard(
                     }
                 }
             }
+
+            // ── Harmonic Mixing toggle (tylko gdy krzywa ≠ None) ────────
+            AnimatedVisibility(visible = source.energyCurve !is EnergyCurve.None) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.GraphicEq,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Harmonic Mixing",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        )
+                        Text(
+                            "Sąsiednie utwory w zgodnych tonacjach (Camelot)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Switch(
+                        checked = source.harmonicMixing,
+                        onCheckedChange = { onUpdate(source.copy(harmonicMixing = it)) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = SpotifyGreen,
+                            checkedTrackColor = SpotifyGreen.copy(alpha = 0.4f)
+                        )
+                    )
+                }
+            }
+
+            // ── Filtry gatunków / wytwórni ──────────────────────────────
+            AnimatedVisibility(visible = source.playlist != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Filtry",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        FilterChipSummary(
+                            label = "Gatunki",
+                            includeCount = source.includeGenres.size,
+                            excludeCount = source.excludeGenres.size,
+                            onClick = { showGenreDialog = true }
+                        )
+                        FilterChipSummary(
+                            label = "Wytwórnie",
+                            includeCount = source.includeLabels.size,
+                            excludeCount = source.excludeLabels.size,
+                            onClick = { showLabelDialog = true }
+                        )
+                    }
+                }
+            }
+
             // ── Pinned Tracks ───────────────────────────────────────────
             AnimatedVisibility(visible = source.playlist != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -341,45 +412,38 @@ fun PlaylistSourceCard(
             }
         }
     }
-}
 
-@Composable
-private fun PinnedTrackChips(
-    pinnedTracks: List<PinnedTrackInfo>,
-    onRemove: (String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        pinnedTracks.chunked(2).forEach { row ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                row.forEach { pinned ->
-                    AssistChip(
-                        onClick = { onRemove(pinned.id) },
-                        label = {
-                            Text(
-                                "📌 ${pinned.title} — ${pinned.artist}",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        },
-                        trailingIcon = {
-                            Icon(
-                                Icons.Default.Close, "Usuń",
-                                modifier = Modifier.size(14.dp)
-                            )
-                        },
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                }
-            }
-        }
+    // ── Dialogi filtrów ─────────────────────────────────────────────────
+    if (showGenreDialog) {
+        GenreFilterDialog(
+            title = "Filtruj gatunki",
+            availableItems = availableGenres,
+            currentInclude = source.includeGenres,
+            currentExclude = source.excludeGenres,
+            onConfirm = { inc, exc ->
+                onUpdate(source.copy(includeGenres = inc, excludeGenres = exc))
+                showGenreDialog = false
+            },
+            onDismiss = { showGenreDialog = false }
+        )
+    }
+
+    if (showLabelDialog) {
+        GenreFilterDialog(
+            title = "Filtruj wytwórnie",
+            availableItems = availableLabels,
+            currentInclude = source.includeLabels,
+            currentExclude = source.excludeLabels,
+            onConfirm = { inc, exc ->
+                onUpdate(source.copy(includeLabels = inc, excludeLabels = exc))
+                showLabelDialog = false
+            },
+            onDismiss = { showLabelDialog = false }
+        )
     }
 }
 
-// ── Stepper liczby utworów ────────────────────────────────────────────────────
+// ── Stepper liczby utworów ───────────────────────────────────────────────
 
 @Composable
 private fun TrackCountStepper(
@@ -420,7 +484,7 @@ private fun TrackCountStepper(
     }
 }
 
-// ── Konfiguracja Wave ────────────────────────────────────────────────────────
+// ── Konfiguracja Wave ────────────────────────────────────────────────────
 
 @Composable
 private fun WaveConfiguration(
@@ -429,7 +493,6 @@ private fun WaveConfiguration(
     onWaveChange: (EnergyCurve.Wave) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Kierunek
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -448,7 +511,6 @@ private fun WaveConfiguration(
             }
         }
 
-        // Stepper tracksPerHalfWave
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -456,7 +518,10 @@ private fun WaveConfiguration(
             Text("Półfala:", style = MaterialTheme.typography.labelMedium)
 
             IconButton(
-                onClick = { if (wave.tracksPerHalfWave > 1) onWaveChange(wave.copy(tracksPerHalfWave = wave.tracksPerHalfWave - 1)) },
+                onClick = {
+                    if (wave.tracksPerHalfWave > 1)
+                        onWaveChange(wave.copy(tracksPerHalfWave = wave.tracksPerHalfWave - 1))
+                },
                 modifier = Modifier.size(28.dp)
             ) {
                 Icon(Icons.Default.KeyboardArrowDown, "Mniej", modifier = Modifier.size(18.dp))
@@ -470,11 +535,8 @@ private fun WaveConfiguration(
 
             IconButton(
                 onClick = {
-                    if (wave.tracksPerHalfWave < 10) onWaveChange(
-                        wave.copy(
-                            tracksPerHalfWave = wave.tracksPerHalfWave + 1
-                        )
-                    )
+                    if (wave.tracksPerHalfWave < 10)
+                        onWaveChange(wave.copy(tracksPerHalfWave = wave.tracksPerHalfWave + 1))
                 },
                 modifier = Modifier.size(28.dp)
             ) {
@@ -488,7 +550,6 @@ private fun WaveConfiguration(
             )
         }
 
-        // Walidacja
         if (trackCount < wave.tracksPerHalfWave) {
             Text(
                 "⚠ Zbyt mało utworów (min. ${wave.tracksPerHalfWave})",
@@ -499,7 +560,45 @@ private fun WaveConfiguration(
     }
 }
 
-// ── Miniaturka krzywej (Canvas 48dp) ─────────────────────────────────────────
+// ── Pinned Track Chips ───────────────────────────────────────────────────
+
+@Composable
+private fun PinnedTrackChips(
+    pinnedTracks: List<PinnedTrackInfo>,
+    onRemove: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        pinnedTracks.chunked(2).forEach { row ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                row.forEach { pinned ->
+                    AssistChip(
+                        onClick = { onRemove(pinned.id) },
+                        label = {
+                            Text(
+                                "📌 ${pinned.title} — ${pinned.artist}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Default.Close, "Usuń",
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Miniaturka krzywej (Canvas 48dp) ─────────────────────────────────────
 
 @Composable
 fun CurveMiniPreview(

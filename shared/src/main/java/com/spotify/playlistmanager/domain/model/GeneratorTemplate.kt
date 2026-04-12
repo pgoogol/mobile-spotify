@@ -18,11 +18,6 @@ data class GeneratorTemplate(
 /**
  * Segment (zrodlo) w szablonie — odpowiednik PlaylistSource
  * ale z trwalymi danymi (playlistId/name zamiast obiektow Playlist).
- *
- * pinnedTracks: lista przypietych utworow zachowana w templacie. Moga pochodzic
- * z OBCYCH playlist (cross-playlist pinning) — w takim wypadku PinnedTrackInfo
- * niesie sourcePlaylistId i fullTrack, dzieki czemu po zaladowaniu templatu
- * utwory beda dostepne nawet jesli obca playlista nie jest aktualnie zaladowana.
  */
 data class TemplateSource(
     val position: Int,
@@ -31,5 +26,10 @@ data class TemplateSource(
     val trackCount: Int,
     val sortBy: SortOption = SortOption.NONE,
     val energyCurve: EnergyCurve = EnergyCurve.None,
-    val pinnedTracks: List<PinnedTrackInfo> = emptyList()
+    val pinnedTracks: List<PinnedTrackInfo> = emptyList(),
+    val harmonicMixing: Boolean = false,
+    val includeGenres: Set<String> = emptySet(),
+    val excludeGenres: Set<String> = emptySet(),
+    val includeLabels: Set<String> = emptySet(),
+    val excludeLabels: Set<String> = emptySet()
 )
