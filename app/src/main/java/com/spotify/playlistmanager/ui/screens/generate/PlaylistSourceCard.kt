@@ -73,7 +73,6 @@ import com.spotify.playlistmanager.ui.theme.SpotifyGreen
  * - AnimatedVisibility: konfiguracja Wave (kierunek + stepper N)
  * - AnimatedVisibility: sortowanie (widoczne tylko gdy krzywa = None)
  * - Harmonic Mixing toggle (widoczny tylko gdy krzywa ≠ None)
- * - Filtry gatunków i wytwórni (widoczne gdy playlista wybrana)
  * - Pinned tracks z obsługą cross-playlist
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,8 +80,6 @@ import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 fun PlaylistSourceCard(
     source: PlaylistSource,
     availablePlaylists: List<Playlist>,
-    availableGenres: List<String>,
-    availableLabels: List<String>,
     onUpdate: (PlaylistSource) -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
@@ -93,9 +90,6 @@ fun PlaylistSourceCard(
     var playlistExpanded by remember { mutableStateOf(false) }
     var curveExpanded by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
-    var showGenreDialog by remember { mutableStateOf(false) }
-    var showLabelDialog by remember { mutableStateOf(false) }
-
     var expandedGroups by remember {
         mutableStateOf(setOf(CurveGroup.SALSA, CurveGroup.BACHATA, CurveGroup.UNIVERSAL))
     }
@@ -350,34 +344,6 @@ fun PlaylistSourceCard(
                 }
             }
 
-            // ── Filtry gatunków / wytwórni ──────────────────────────────
-            AnimatedVisibility(visible = source.playlist != null) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "Filtry",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        FilterChipSummary(
-                            label = "Gatunki",
-                            includeCount = source.includeGenres.size,
-                            excludeCount = source.excludeGenres.size,
-                            onClick = { showGenreDialog = true }
-                        )
-                        FilterChipSummary(
-                            label = "Wytwórnie",
-                            includeCount = source.includeLabels.size,
-                            excludeCount = source.excludeLabels.size,
-                            onClick = { showLabelDialog = true }
-                        )
-                    }
-                }
-            }
-
             // ── Pinned Tracks ───────────────────────────────────────────
             AnimatedVisibility(visible = source.playlist != null) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -413,34 +379,6 @@ fun PlaylistSourceCard(
         }
     }
 
-    // ── Dialogi filtrów ─────────────────────────────────────────────────
-    if (showGenreDialog) {
-        GenreFilterDialog(
-            title = "Filtruj gatunki",
-            availableItems = availableGenres,
-            currentInclude = source.includeGenres,
-            currentExclude = source.excludeGenres,
-            onConfirm = { inc, exc ->
-                onUpdate(source.copy(includeGenres = inc, excludeGenres = exc))
-                showGenreDialog = false
-            },
-            onDismiss = { showGenreDialog = false }
-        )
-    }
-
-    if (showLabelDialog) {
-        GenreFilterDialog(
-            title = "Filtruj wytwórnie",
-            availableItems = availableLabels,
-            currentInclude = source.includeLabels,
-            currentExclude = source.excludeLabels,
-            onConfirm = { inc, exc ->
-                onUpdate(source.copy(includeLabels = inc, excludeLabels = exc))
-                showLabelDialog = false
-            },
-            onDismiss = { showLabelDialog = false }
-        )
-    }
 }
 
 // ── Stepper liczby utworów ───────────────────────────────────────────────

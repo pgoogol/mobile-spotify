@@ -169,10 +169,6 @@ class GenerateViewModel @Inject constructor(
     private val _featuresMap = MutableStateFlow<Map<String, TrackAudioFeatures>>(emptyMap())
     val featuresMap: StateFlow<Map<String, TrackAudioFeatures>> = _featuresMap.asStateFlow()
 
-    /** Track IDs per playlist źródłowy — do filtrowania genres/labels per source. */
-    private val _sourceTrackIds = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
-    val sourceTrackIds: StateFlow<Map<String, Set<String>>> = _sourceTrackIds.asStateFlow()
-
     /**
      * Szybki lookup MatchedTrack po trackId — agregowany ze wszystkich rund historii.
      * Używany przez UI do wyświetlania targetScore i compositeScore per utwór.
@@ -342,9 +338,6 @@ class GenerateViewModel @Inject constructor(
                     repository.getPlaylistTracks(playlistId)
                 }
                 val trackIds = tracks.mapNotNull { it.id }.distinct()
-
-                // Zapamiętaj track IDs dla tej playlisty
-                _sourceTrackIds.update { it + (playlistId to trackIds.toSet()) }
 
                 // Załaduj features z lokalnego cache (CSV)
                 val missing = trackIds.filterNot { _featuresMap.value.containsKey(it) }
