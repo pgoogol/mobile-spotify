@@ -65,10 +65,18 @@ class SpotifyRepository @Inject constructor(
                 CachePolicy.NETWORK_ONLY -> { /* fall through */ }
             }
 
-            // Fetch z API
-            val fresh = fetchAllPlaylistsFromApi()
-            cache.cachePlaylists(fresh, now)
-            fresh
+            // Fetch z API — przy CACHE_FIRST fallback na stale cache gdy sieć niedostępna
+            try {
+                val fresh = fetchAllPlaylistsFromApi()
+                cache.cachePlaylists(fresh, now)
+                fresh
+            } catch (e: Exception) {
+                if (policy == CachePolicy.CACHE_FIRST) {
+                    val stale = cache.getCachedPlaylists()
+                    if (stale.isNotEmpty()) return@withContext stale
+                }
+                throw e
+            }
         }
 
     // ════════════════════════════════════════════════════════
@@ -96,36 +104,51 @@ class SpotifyRepository @Inject constructor(
             if (currentSnapshot != null && cache.areTracksFresh(playlistId, currentSnapshot)) {
                 cache.getCachedTracks(playlistId)?.let { return@withContext it }
             }
+
+            // Snapshot fetch się nie udał (offline) — użyj cache jeśli istnieje
+            if (currentSnapshot == null) {
+                cache.getCachedTracks(playlistId)?.let { cached ->
+                    if (cached.isNotEmpty()) return@withContext cached
+                }
+            }
         }
 
         // NETWORK_ONLY albo cache nieaktualny — pełen fetch
-        val items = fetchAllPlaylistItems(playlistId)
-        val tracks = items.mapNotNull { it.track?.toDomain() }
+        try {
+            val items = fetchAllPlaylistItems(playlistId)
+            val tracks = items.mapNotNull { it.track?.toDomain() }
 
-        // Zapisz do cache. Snapshot pobieramy ponownie, na wypadek zmiany w trakcie fetcha.
-        val finalSnapshot = runCatching {
-            api.getPlaylistSnapshot(playlistId).snapshot_id
-        }.getOrNull()
+            // Zapisz do cache. Snapshot pobieramy ponownie, na wypadek zmiany w trakcie fetcha.
+            val finalSnapshot = runCatching {
+                api.getPlaylistSnapshot(playlistId).snapshot_id
+            }.getOrNull()
 
-        // Potrzebujemy nagłówka do cache'owania. Jeśli nie ma w cache, sprokurujemy minimalny.
-        val playlistHeader = cache.getCachedPlaylists().find { it.id == playlistId }
-            ?: Playlist(
-                id = playlistId,
-                name = "",       // i tak zostanie nadpisany przy następnym getUserPlaylists
-                description = null,
-                imageUrl = null,
-                trackCount = tracks.size,
-                ownerId = "",
-                snapshotId = finalSnapshot
+            // Potrzebujemy nagłówka do cache'owania. Jeśli nie ma w cache, sprokurujemy minimalny.
+            val playlistHeader = cache.getCachedPlaylists().find { it.id == playlistId }
+                ?: Playlist(
+                    id = playlistId,
+                    name = "",       // i tak zostanie nadpisany przy następnym getUserPlaylists
+                    description = null,
+                    imageUrl = null,
+                    trackCount = tracks.size,
+                    ownerId = "",
+                    snapshotId = finalSnapshot
+                )
+
+            cache.cacheTracks(
+                playlist = playlistHeader,
+                tracks = tracks,
+                snapshotId = finalSnapshot,
+                now = System.currentTimeMillis()
             )
-
-        cache.cacheTracks(
-            playlist = playlistHeader,
-            tracks = tracks,
-            snapshotId = finalSnapshot,
-            now = System.currentTimeMillis()
-        )
-        tracks
+            tracks
+        } catch (e: Exception) {
+            if (policy == CachePolicy.CACHE_FIRST) {
+                val stale = cache.getCachedTracks(playlistId)
+                if (!stale.isNullOrEmpty()) return@withContext stale
+            }
+            throw e
+        }
     }
 
     /** Backward-compat wariant — używa CACHE_FIRST. */
@@ -149,21 +172,29 @@ class SpotifyRepository @Inject constructor(
                 CachePolicy.NETWORK_ONLY -> { /* fall through */ }
             }
 
-            // Fetch z API
-            val fresh = fetchLikedTracksFromApi()
+            // Fetch z API — przy CACHE_FIRST fallback na stale cache gdy sieć niedostępna
+            try {
+                val fresh = fetchLikedTracksFromApi()
 
-            // Stwórz syntetyczny nagłówek dla Liked Songs
-            val likedHeader = Playlist(
-                id = LIKED_ID,
-                name = "❤ Polubione utwory",
-                description = null,
-                imageUrl = null,
-                trackCount = fresh.size,
-                ownerId = tokenManager.getUserId() ?: "",
-                snapshotId = null
-            )
-            cache.cacheTracks(likedHeader, fresh, snapshotId = null, now = now)
-            fresh
+                // Stwórz syntetyczny nagłówek dla Liked Songs
+                val likedHeader = Playlist(
+                    id = LIKED_ID,
+                    name = "❤ Polubione utwory",
+                    description = null,
+                    imageUrl = null,
+                    trackCount = fresh.size,
+                    ownerId = tokenManager.getUserId() ?: "",
+                    snapshotId = null
+                )
+                cache.cacheTracks(likedHeader, fresh, snapshotId = null, now = now)
+                fresh
+            } catch (e: Exception) {
+                if (policy == CachePolicy.CACHE_FIRST) {
+                    val stale = cache.getCachedTracks(LIKED_ID)
+                    if (!stale.isNullOrEmpty()) return@withContext stale
+                }
+                throw e
+            }
         }
 
     // ════════════════════════════════════════════════════════

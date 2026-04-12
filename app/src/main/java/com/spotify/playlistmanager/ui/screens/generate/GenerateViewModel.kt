@@ -169,6 +169,10 @@ class GenerateViewModel @Inject constructor(
     private val _featuresMap = MutableStateFlow<Map<String, TrackAudioFeatures>>(emptyMap())
     val featuresMap: StateFlow<Map<String, TrackAudioFeatures>> = _featuresMap.asStateFlow()
 
+    /** Track IDs per playlist źródłowy — do filtrowania genres/labels per source. */
+    private val _sourceTrackIds = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    val sourceTrackIds: StateFlow<Map<String, Set<String>>> = _sourceTrackIds.asStateFlow()
+
     /**
      * Szybki lookup MatchedTrack po trackId — agregowany ze wszystkich rund historii.
      * Używany przez UI do wyświetlania targetScore i compositeScore per utwór.
@@ -292,6 +296,9 @@ class GenerateViewModel @Inject constructor(
     }
 
     fun updateSource(updated: PlaylistSource) {
+        val oldSource = _state.value.sources.find { it.id == updated.id }
+        val playlistChanged = oldSource?.playlist?.id != updated.playlist?.id
+
         _state.update { s ->
             s.copy(sources = s.sources.map { src ->
                 if (src.id == updated.id) {
@@ -299,7 +306,7 @@ class GenerateViewModel @Inject constructor(
                         updated.pinnedTracks.take(updated.trackCount)
                     else updated.pinnedTracks
 
-                    val finalPinned = if (src.playlist?.id != updated.playlist?.id) {
+                    val finalPinned = if (playlistChanged) {
                         // Zmieniono playliste zrodla segmentu — kasujemy pinned ze
                         // STAREJ playlisty zrodla, ale pinned z innych playlist
                         // przetrwuja (bo ich zrodlo to inna, niezmieniona playlista).
@@ -313,6 +320,39 @@ class GenerateViewModel @Inject constructor(
                     updated.copy(pinnedTracks = finalPinned)
                 } else src
             })
+        }
+
+        // Załaduj features dla wybranej playlisty (do filtrów gatunków/wytwórni)
+        val newPlaylistId = updated.playlist?.id
+        if (playlistChanged && newPlaylistId != null) {
+            loadFeaturesForSource(newPlaylistId)
+        }
+    }
+
+    /**
+     * Ładuje tracki z playlisty źródłowej i ich features z lokalnego cache.
+     * Dzięki temu filtry gatunków/wytwórni mają dane zanim użytkownik wygeneruje.
+     */
+    private fun loadFeaturesForSource(playlistId: String) {
+        viewModelScope.launch {
+            runCatching {
+                val tracks = if (playlistId == GeneratePlaylistUseCase.LIKED_SONGS_ID) {
+                    repository.getLikedTracks()
+                } else {
+                    repository.getPlaylistTracks(playlistId)
+                }
+                val trackIds = tracks.mapNotNull { it.id }.distinct()
+
+                // Zapamiętaj track IDs dla tej playlisty
+                _sourceTrackIds.update { it + (playlistId to trackIds.toSet()) }
+
+                // Załaduj features z lokalnego cache (CSV)
+                val missing = trackIds.filterNot { _featuresMap.value.containsKey(it) }
+                if (missing.isNotEmpty()) {
+                    val fresh = featuresRepository.getFeaturesMap(missing)
+                    _featuresMap.update { current -> current + fresh }
+                }
+            }
         }
     }
 

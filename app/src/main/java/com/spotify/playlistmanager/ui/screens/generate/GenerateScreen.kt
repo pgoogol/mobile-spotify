@@ -113,6 +113,7 @@ fun GenerateScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val featuresMap by viewModel.featuresMap.collectAsStateWithLifecycle()
+    val sourceTrackIds by viewModel.sourceTrackIds.collectAsStateWithLifecycle()
     val matchedLookup by viewModel.matchedTrackLookup.collectAsStateWithLifecycle()
     val templateCount by viewModel.templateCount.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -322,8 +323,13 @@ fun GenerateScreen(
                 }
             } else {
                 itemsIndexed(state.sources, key = { _, s -> s.id }) { _, source ->
-                    val genres = remember(featuresMap) { GenreExtractor.extractGenres(featuresMap) }
-                    val labels = remember(featuresMap) { GenreExtractor.extractLabels(featuresMap) }
+                    val sourceIds = source.playlist?.id?.let { sourceTrackIds[it] }
+                    val sourceFeatures = remember(featuresMap, sourceIds) {
+                        if (sourceIds != null) featuresMap.filterKeys { it in sourceIds }
+                        else featuresMap
+                    }
+                    val genres = remember(sourceFeatures) { GenreExtractor.extractGenres(sourceFeatures) }
+                    val labels = remember(sourceFeatures) { GenreExtractor.extractLabels(sourceFeatures) }
                     PlaylistSourceCard(
                         source = source,
                         availablePlaylists = state.availablePlaylists,
