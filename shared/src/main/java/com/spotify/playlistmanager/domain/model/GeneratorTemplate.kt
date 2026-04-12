@@ -27,9 +27,5 @@ data class TemplateSource(
     val sortBy: SortOption = SortOption.NONE,
     val energyCurve: EnergyCurve = EnergyCurve.None,
     val pinnedTracks: List<PinnedTrackInfo> = emptyList(),
-    val harmonicMixing: Boolean = false,
-    val includeGenres: Set<String> = emptySet(),
-    val excludeGenres: Set<String> = emptySet(),
-    val includeLabels: Set<String> = emptySet(),
-    val excludeLabels: Set<String> = emptySet()
+    val harmonicMixing: Boolean = false
 )

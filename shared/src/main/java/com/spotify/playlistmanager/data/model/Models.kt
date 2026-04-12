@@ -193,15 +193,7 @@ data class PlaylistSource(
     val energyCurve: EnergyCurve = EnergyCurve.None,
     val pinnedTracks: List<PinnedTrackInfo> = emptyList(),
     /** Czy zastosować optymalizację harmoniczną (Camelot Wheel) po dopasowaniu do krzywej. */
-    val harmonicMixing: Boolean = false,
-    /** Whitelist gatunków — puste = brak filtra. Case-insensitive contains. */
-    val includeGenres: Set<String> = emptySet(),
-    /** Blacklist gatunków — puste = brak filtra. */
-    val excludeGenres: Set<String> = emptySet(),
-    /** Whitelist wytwórni — puste = brak filtra. */
-    val includeLabels: Set<String> = emptySet(),
-    /** Blacklist wytwórni — puste = brak filtra. */
-    val excludeLabels: Set<String> = emptySet()
+    val harmonicMixing: Boolean = false
 )
 
 private fun randomId(): String =

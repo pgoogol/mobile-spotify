@@ -12,7 +12,6 @@ import com.spotify.playlistmanager.domain.model.GenerateResult
 import com.spotify.playlistmanager.domain.model.HarmonicOptimizer
 import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.SegmentMatchResult
-import com.spotify.playlistmanager.domain.model.TrackFilter
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import javax.inject.Inject
@@ -46,12 +45,9 @@ class GeneratePlaylistUseCase @Inject constructor(
             val sourceTracks = fetchTracks(playlistId)
             val allTracks = mergePinnedFromExternalPlaylists(sourceTracks, source, playlistId)
 
-            // ── Filtrowanie po gatunkach/wytwórniach ──────────────────────
-            val filteredTracks = applyGenreAndLabelFilter(allTracks, source)
-
             val pinnedIds = source.pinnedTracks.map { it.id }.toSet()
-            val pinnedTracks = filteredTracks.filter { it.id in pinnedIds }
-            val nonPinned = filteredTracks.filter {
+            val pinnedTracks = allTracks.filter { it.id in pinnedIds }
+            val nonPinned = allTracks.filter {
                 it.id !in pinnedIds && it.id !in runningExclude
             }
 
@@ -88,12 +84,9 @@ class GeneratePlaylistUseCase @Inject constructor(
             val sourceTracks = fetchTracks(playlistId)
             val allPlaylistTracks = mergePinnedFromExternalPlaylists(sourceTracks, source, playlistId)
 
-            // ── Filtrowanie po gatunkach/wytwórniach ──────────────────────
-            val filteredAll = applyGenreAndLabelFilter(allPlaylistTracks, source)
-
             val pinnedIds = source.pinnedTracks.map { it.id }.toSet()
-            val pinnedTracks = filteredAll.filter { it.id in pinnedIds }
-            val nonPinnedAvailable = filteredAll.filter {
+            val pinnedTracks = allPlaylistTracks.filter { it.id in pinnedIds }
+            val nonPinnedAvailable = allPlaylistTracks.filter {
                 it.id !in runningExclude && it.id !in pinnedIds
             }
             val available = pinnedTracks + nonPinnedAvailable
@@ -238,30 +231,6 @@ class GeneratePlaylistUseCase @Inject constructor(
 
         return if (externalPinned.isEmpty()) sourceTracks
         else sourceTracks + externalPinned
-    }
-
-    /**
-     * Aplikuje filtry gatunków i wytwórni z PlaylistSource.
-     * Jeśli wszystkie filtry puste — zwraca oryginalną listę (fast path).
-     */
-    private suspend fun applyGenreAndLabelFilter(
-        tracks: List<Track>,
-        source: PlaylistSource
-    ): List<Track> {
-        if (source.includeGenres.isEmpty() && source.excludeGenres.isEmpty() &&
-            source.includeLabels.isEmpty() && source.excludeLabels.isEmpty()
-        ) {
-            return tracks
-        }
-        val featuresMap = loadFeaturesMap(tracks)
-        return TrackFilter.apply(
-            tracks = tracks,
-            featuresMap = featuresMap,
-            includeGenres = source.includeGenres,
-            excludeGenres = source.excludeGenres,
-            includeLabels = source.includeLabels,
-            excludeLabels = source.excludeLabels
-        )
     }
 
     private suspend fun loadFeaturesMap(tracks: List<Track>): Map<String, TrackAudioFeatures> =
