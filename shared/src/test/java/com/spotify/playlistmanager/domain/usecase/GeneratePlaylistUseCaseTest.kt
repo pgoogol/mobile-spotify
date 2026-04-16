@@ -226,7 +226,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 4,
-            energyCurve = EnergyCurve.SalsaRomantica
+            energyCurve = EnergyCurve.Rising
         )
         val result = useCase.generateWithCurves(listOf(source))
         assertEquals(4, result.generateResult.tracks.size)
@@ -240,11 +240,11 @@ class GeneratePlaylistUseCaseTest {
         val sources = listOf(
             PlaylistSource(
                 playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
-                trackCount = 3, energyCurve = EnergyCurve.SalsaRomantica
+                trackCount = 3, energyCurve = EnergyCurve.Rising
             ),
             PlaylistSource(
                 playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
-                trackCount = 2, energyCurve = EnergyCurve.SalsaRapida
+                trackCount = 2, energyCurve = EnergyCurve.Rising
             )
         )
         val result = useCase.generateWithCurves(sources, smoothJoin = true)
@@ -260,7 +260,7 @@ class GeneratePlaylistUseCaseTest {
         )
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
-            trackCount = 3, energyCurve = EnergyCurve.SalsaRomantica
+            trackCount = 3, energyCurve = EnergyCurve.Rising
         )
         val result = uc.generateWithCurves(listOf(source))
         assertEquals(3, result.generateResult.tracks.size)
@@ -404,7 +404,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 3,
-            energyCurve = EnergyCurve.SalsaRomantica,
+            energyCurve = EnergyCurve.Rising,
             pinnedTracks = listOf(
                 PinnedTrackInfo("t1", "Track A", "Artysta"),
                 PinnedTrackInfo("t4", "Track D", "Artysta")
@@ -422,7 +422,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 3,
-            energyCurve = EnergyCurve.SalsaRomantica,
+            energyCurve = EnergyCurve.Rising,
             pinnedTracks = listOf(
                 PinnedTrackInfo("t1", "Track A", "Artysta")
             )
@@ -458,7 +458,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 5,
-            energyCurve = EnergyCurve.SalsaClasica,
+            energyCurve = EnergyCurve.Arc,
             pinnedTracks = listOf(
                 PinnedTrackInfo("t1", "Track A", "Artysta"),
                 PinnedTrackInfo("t3", "Track C", "Artysta")
@@ -515,7 +515,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 4,
-            energyCurve = EnergyCurve.SalsaRomantica,
+            energyCurve = EnergyCurve.Rising,
             pinnedTracks = listOf(
                 PinnedTrackInfo(
                     id = "ext-2",

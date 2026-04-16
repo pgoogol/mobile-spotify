@@ -11,6 +11,7 @@ import com.spotify.playlistmanager.domain.model.ExhaustionStatus
 import com.spotify.playlistmanager.domain.model.GenerateResult
 import com.spotify.playlistmanager.domain.model.HarmonicOptimizer
 import com.spotify.playlistmanager.domain.model.MatchedTrack
+import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.model.SegmentMatchResult
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
@@ -74,6 +75,7 @@ class GeneratePlaylistUseCase @Inject constructor(
         val exhaustionStatuses = mutableListOf<ExhaustionStatus>()
         val exhaustedPlaylists = mutableListOf<ExhaustionStatus>()
         var prevLastScore: Float? = null
+        var prevAxis: ScoreAxis? = null
 
         val runningExclude = excludeTrackIds.toMutableSet()
 
@@ -126,9 +128,13 @@ class GeneratePlaylistUseCase @Inject constructor(
                         tracks = matchedTracks,
                         targetScores = emptyList(),
                         matchPercentage = 1f,
-                        lastScore = matchedTracks.lastOrNull()?.compositeScore ?: 0f
+                        lastScore = matchedTracks.lastOrNull()?.compositeScore ?: 0f,
+                        scoreAxis = ScoreAxis.DANCE
                     )
                 )
+                // None curve — brak spójności osi dla smooth join z następnym segmentem
+                prevLastScore = null
+                prevAxis = null
             } else {
                 val featuresMap = loadFeaturesMap(available)
                 val segment = EnergyCurveCalculator.matchTracks(
@@ -138,7 +144,8 @@ class GeneratePlaylistUseCase @Inject constructor(
                     pinnedTrackIds = pinnedIds.toList(),
                     trackCount = source.trackCount,
                     smoothJoin = smoothJoin,
-                    prevLastScore = prevLastScore
+                    prevLastScore = prevLastScore,
+                    prevAxis = prevAxis
                 )
 
                 // ── Optymalizacja harmoniczna (opcjonalna) ────────────────
@@ -156,6 +163,7 @@ class GeneratePlaylistUseCase @Inject constructor(
                 newlyUsedIds.addAll(takenIds)
                 runningExclude.addAll(takenIds)
                 prevLastScore = finalSegment.lastScore
+                prevAxis = finalSegment.scoreAxis
             }
 
             val sourceTrackIds = sourceTracks.mapNotNull { it.id }.toSet()

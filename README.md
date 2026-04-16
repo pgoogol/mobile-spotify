@@ -98,22 +98,36 @@ lub otwórz projekt w **Android Studio** (Hedgehog+) i kliknij Run.
 ### Generator playlist
 - Wiele źródeł z indywidualnymi ustawieniami
 - Sortowanie: popularność, długość, energia, taneczność, BPM, data
-- **Krzywe energii:** wzrastająca ↗, opadająca ↘, fala ∿, losowa 🎲,
-  Salsa 💃, Bachata 🌹, Reggaeton 🔥, Merengue ⚡, Cumbia 🎺, stała ─
+- **Strategie segmentu:** Brak, Narastająco ↗, Opadająco ↘, Stabilnie ━,
+  Łuk 🎢, Dolina 🌀, Fala ∿, Romantycznie 🌹, Spokojnie 🌙
 - Wykres krzywej energii (Canvas) – docelowa vs rzeczywista
 - Zmiana kolejności (przyciski ▲▼)
 - Zapis playlisty bezpośrednio do Spotify
 
-## Krzywe energii – algorytm
+## Strategie segmentu – algorytm
 
-Każda krzywa generuje docelową wartość energii (0–1) dla każdej pozycji
-w playliście. Następnie algorytm dopasowuje dostępne utwory do pozycji
-minimalizując odchylenie ich rzeczywistej energii od docelowej.
+Każda strategia definiuje dwa wymiary:
 
-```
-Salsa:     base + clave (rytm 3-2)
-Bachata:   powolne narastanie z pulsami
-Reggaeton: plateau z gwałtownym narastaniem/zejściem
-Merengue:  stale wysokie tempo z minimalnymi wahaniami
-Cumbia:    budowanie przez całą playlistę z dwiema falami
-```
+1. **Kształt** – `generateTargets(N)` zwraca listę docelowych score'ów [0..1]
+   dla kolejnych pozycji. Matcher szuka w puli tracków o score najbliższym
+   do targetu (po auto-skalowaniu do percentyli p5–p95 puli).
+
+2. **Oś** (`ScoreAxis`) – który composite score jest używany:
+   - `DANCE` = 0.45·BPM + 0.35·energy + 0.20·danceability
+   - `MOOD`  = 0.55·valence + 0.25·(1−acousticness) + 0.20·danceability
+
+| Strategia      | Symbol | Oś    | Kształt                          | Min N |
+|----------------|--------|-------|----------------------------------|-------|
+| Brak           | —      | DANCE | sortowanie wg ustawień           | 1     |
+| Narastająco    | ↗      | DANCE | 0.0 → 1.0 liniowo                | 2     |
+| Opadająco      | ↘      | DANCE | 1.0 → 0.0 liniowo                | 2     |
+| Stabilnie      | ━      | DANCE | wszystkie 0.5 (blisko mediany)   | 2     |
+| Łuk            | 🎢     | DANCE | narasta → pik (65%) → opada      | 3     |
+| Dolina         | 🌀     | DANCE | opada → dno (50%) → narasta      | 3     |
+| Fala           | ∿      | DANCE | sinusoida (konfigurowalny takt)  | 2     |
+| Romantycznie   | 🌹     | MOOD  | wszystkie 1.0 (top MOOD)         | 2     |
+| Spokojnie      | 🌙     | MOOD  | 1.0 → 0.3 (schłodzenie klimatu)  | 2     |
+
+Auto-range: targety są skalowane do rozkładu p5–p95 puli, więc bachata
+(composite ~0.15–0.35) i salsa (composite ~0.55–0.95) dają pełną
+rozpiętość bez konfiguracji zakresu.

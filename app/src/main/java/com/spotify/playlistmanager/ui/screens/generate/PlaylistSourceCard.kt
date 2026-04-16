@@ -15,8 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -31,7 +29,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,7 +55,6 @@ import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
 import com.spotify.playlistmanager.data.model.SortOption
-import com.spotify.playlistmanager.domain.model.CurveGroup
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.WaveDirection
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
@@ -90,9 +86,6 @@ fun PlaylistSourceCard(
     var playlistExpanded by remember { mutableStateOf(false) }
     var curveExpanded by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
-    var expandedGroups by remember {
-        mutableStateOf(setOf(CurveGroup.SALSA, CurveGroup.BACHATA, CurveGroup.UNIVERSAL))
-    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -173,7 +166,7 @@ fun PlaylistSourceCard(
                         value = source.energyCurve.displayName,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Krzywa") },
+                        label = { Text("Strategia") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = curveExpanded) },
                         modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         singleLine = true,
@@ -184,68 +177,14 @@ fun PlaylistSourceCard(
                         expanded = curveExpanded,
                         onDismissRequest = { curveExpanded = false }
                     ) {
-                        EnergyCurve.groupedPresets.entries.forEachIndexed { groupIdx, (group, curves) ->
-                            if (group == CurveGroup.NONE) {
-                                curves.forEach { preset ->
-                                    DropdownMenuItem(
-                                        text = { Text(preset.displayName) },
-                                        onClick = {
-                                            onUpdate(source.copy(energyCurve = preset))
-                                            curveExpanded = false
-                                        }
-                                    )
+                        EnergyCurve.presets.forEach { preset ->
+                            DropdownMenuItem(
+                                text = { Text(preset.displayName) },
+                                onClick = {
+                                    onUpdate(source.copy(energyCurve = preset))
+                                    curveExpanded = false
                                 }
-                            } else {
-                                if (groupIdx > 0) {
-                                    HorizontalDivider()
-                                }
-                                val isExpanded = group in expandedGroups
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            group.displayName,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Icon(
-                                            imageVector = if (isExpanded)
-                                                Icons.Default.ExpandLess
-                                            else
-                                                Icons.Default.ExpandMore,
-                                            contentDescription = if (isExpanded)
-                                                "Zwiń ${group.displayName}"
-                                            else
-                                                "Rozwiń ${group.displayName}"
-                                        )
-                                    },
-                                    onClick = {
-                                        expandedGroups = if (isExpanded) {
-                                            expandedGroups - group
-                                        } else {
-                                            expandedGroups + group
-                                        }
-                                    }
-                                )
-                                if (isExpanded) {
-                                    curves.forEach { preset ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    preset.displayName,
-                                                    modifier = Modifier.padding(start = 12.dp)
-                                                )
-                                            },
-                                            onClick = {
-                                                onUpdate(source.copy(energyCurve = preset))
-                                                curveExpanded = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
+                            )
                         }
                     }
                 }
@@ -257,6 +196,16 @@ fun PlaylistSourceCard(
                         modifier = Modifier.size(48.dp)
                     )
                 }
+            }
+
+            // ── Ostrzeżenie Arc/Valley (min 3 utwory) ──────────────────
+            val needsMinThree = source.energyCurve is EnergyCurve.Arc || source.energyCurve is EnergyCurve.Valley
+            AnimatedVisibility(visible = needsMinThree && source.trackCount < 3) {
+                Text(
+                    "⚠ ${source.energyCurve.displayName} wymaga min. 3 utworów — z 2 przejdzie na prostszą strategię",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
 
             // ── Konfiguracja Wave ───────────────────────────────────────
@@ -490,7 +439,7 @@ private fun WaveConfiguration(
 
         if (trackCount < wave.tracksPerHalfWave) {
             Text(
-                "⚠ Zbyt mało utworów (min. ${wave.tracksPerHalfWave})",
+                "⚠ Zbyt mało utworów dla pełnej fali (min. ${wave.tracksPerHalfWave})",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error
             )
