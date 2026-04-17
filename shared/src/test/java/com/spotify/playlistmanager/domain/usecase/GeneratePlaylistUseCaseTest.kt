@@ -247,7 +247,7 @@ class GeneratePlaylistUseCaseTest {
                 trackCount = 2, energyCurve = EnergyCurve.Rising
             )
         )
-        val result = useCase.generateWithCurves(sources, smoothJoin = true)
+        val result = useCase.generateWithCurves(sources, enableContinuation = true)
         assertEquals(5, result.generateResult.tracks.size)
         assertEquals(2, result.generateResult.segments.size)
     }

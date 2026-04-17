@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.ui.unit.sp
+import com.spotify.playlistmanager.domain.model.ContinuationStatus
 import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.SegmentMatchResult
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
@@ -240,6 +241,47 @@ fun EnergyCurveChart(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+
+        // Ostrzeżenia o kontynuacji
+        if (!isDryRun) {
+            displayedSegments.forEachIndexed { idx, seg ->
+                when (val status = seg.continuationStatus) {
+                    is ContinuationStatus.Warning -> {
+                        val pct = (status.remainingRange * 100).toInt()
+                        ContinuationWarningRow(
+                            segmentIndex = idx + 1,
+                            message = "Mało miejsca w zakresie krzywej ($pct% pozostało) — rozważ inną strategię",
+                            color = ChipYellow
+                        )
+                    }
+                    is ContinuationStatus.Impossible -> {
+                        val end = "%.2f".format(status.naturalEnd)
+                        ContinuationWarningRow(
+                            segmentIndex = idx + 1,
+                            message = "Poprzedni segment przekroczył zakres tej krzywej (max $end) — wybierz inną strategię",
+                            color = ChipRed
+                        )
+                    }
+                    is ContinuationStatus.Ok -> Unit
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContinuationWarningRow(segmentIndex: Int, message: String, color: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            "Seg. $segmentIndex: $message",
+            style = MaterialTheme.typography.labelSmall,
+            color = color
+        )
     }
 }
 

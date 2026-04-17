@@ -289,9 +289,9 @@ fun GenerateScreen(
             if (hasCurves) {
                 item {
                     ToggleRow(
-                        title = "Smooth Join",
-                        subtitle = "Wygładza przejścia między segmentami",
-                        checked = state.smoothJoin,
+                        title = "Kontynuacja segmentów",
+                        subtitle = "Każdy segment zaczyna od miejsca, gdzie skończył poprzedni",
+                        checked = state.enableContinuation,
                         onCheckedChange = viewModel::onSmoothJoinChange
                     )
                 }
@@ -323,7 +323,7 @@ fun GenerateScreen(
                 }
             } else {
                 itemsIndexed(state.sources, key = { _, s -> s.id }) { index, source ->
-                    val prevAxis = if (index > 0 && state.smoothJoin)
+                    val prevAxis = if (index > 0 && state.enableContinuation)
                         state.sources[index - 1].energyCurve.scoreAxis
                     else null
                     PlaylistSourceCard(

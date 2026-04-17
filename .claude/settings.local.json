@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :shared:compileDebugKotlin --quiet)",
+      "Bash(./gradlew :app:compileDebugKotlin --quiet)",
+      "Bash(./gradlew :shared:test --tests \"*.EnergyCurveCalculatorTest\" --quiet)",
+      "Bash(./gradlew :shared:testDebugUnitTest --quiet)",
+      "Bash(./gradlew :shared:testDebugUnitTest)",
+      "Bash(./gradlew :shared:compileDebugKotlin --info)",
+      "Bash(./gradlew :shared:compileDebugKotlin)",
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(./gradlew :shared:compileDebugUnitTestKotlin)"
+    ]
+  }
+}

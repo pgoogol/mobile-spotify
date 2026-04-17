@@ -119,14 +119,14 @@ class EnergyCurveCalculatorTest {
     }
 
     @Test
-    fun `smooth join with null prevLastScore has no effect`() {
+    fun `continuation with null prevLastScore has no effect`() {
         val r1 = EnergyCurveCalculator.matchTracks(
             testPool, testFeaturesMap, EnergyCurve.Rising, emptyList(), 5,
-            smoothJoin = true, prevLastScore = null
+            enableContinuation = true, prevLastScore = null
         )
         val r2 = EnergyCurveCalculator.matchTracks(
             testPool, testFeaturesMap, EnergyCurve.Rising, emptyList(), 5,
-            smoothJoin = false, prevLastScore = null
+            enableContinuation = false, prevLastScore = null
         )
         assertEquals(r1.targetScores, r2.targetScores)
     }
@@ -330,27 +330,25 @@ class EnergyCurveCalculatorTest {
     // ══════════════════════════════════════════════════════════
 
     @Test
-    fun `smooth join not applied when prev axis differs`() {
-        // MOOD prev z DANCE current → smooth join ignorowany
-        val resultWithJoin = EnergyCurveCalculator.matchTracks(
+    fun `continuation not applied when prev axis differs`() {
+        // MOOD prev z DANCE current → kontynuacja ignorowana
+        val resultWithContinuation = EnergyCurveCalculator.matchTracks(
             testPool, testFeaturesMap, EnergyCurve.Rising, emptyList(), 5,
-            smoothJoin = true, prevLastScore = 0.9f, prevAxis = ScoreAxis.MOOD
+            enableContinuation = true, prevLastScore = 0.9f, prevAxis = ScoreAxis.MOOD
         )
-        val resultWithoutJoin = EnergyCurveCalculator.matchTracks(
+        val resultWithoutContinuation = EnergyCurveCalculator.matchTracks(
             testPool, testFeaturesMap, EnergyCurve.Rising, emptyList(), 5,
-            smoothJoin = false, prevLastScore = null, prevAxis = null
+            enableContinuation = false, prevLastScore = null, prevAxis = null
         )
-        // Targety powinny być identyczne (smooth join pominięty)
-        assertEquals(resultWithJoin.targetScores, resultWithoutJoin.targetScores)
+        // Targety powinny być identyczne (kontynuacja pominięta)
+        assertEquals(resultWithContinuation.targetScores, resultWithoutContinuation.targetScores)
     }
 
     @Test
-    fun `smooth join same axis does not crash and preserves track count`() {
-        // targetScores = rescaledTargets (nie effectiveTargets) — smooth join działa wewnętrznie.
-        // Weryfikujemy że wynik jest poprawny strukturalnie.
+    fun `continuation same axis does not crash and preserves track count`() {
         val result = EnergyCurveCalculator.matchTracks(
             testPool, testFeaturesMap, EnergyCurve.Rising, emptyList(), 5,
-            smoothJoin = true, prevLastScore = 0.3f, prevAxis = ScoreAxis.DANCE
+            enableContinuation = true, prevLastScore = 0.3f, prevAxis = ScoreAxis.DANCE
         )
         assertEquals(5, result.tracks.size)
         assertEquals(5, result.targetScores.size)

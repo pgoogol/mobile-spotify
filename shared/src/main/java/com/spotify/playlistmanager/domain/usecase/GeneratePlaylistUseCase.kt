@@ -66,7 +66,7 @@ class GeneratePlaylistUseCase @Inject constructor(
      */
     suspend fun generateWithCurves(
         sources: List<PlaylistSource>,
-        smoothJoin: Boolean = true,
+        enableContinuation: Boolean = true,
         excludeTrackIds: Set<String> = emptySet()
     ): GenerateWithExhaustionResult {
         val allSegments = mutableListOf<SegmentMatchResult>()
@@ -144,7 +144,7 @@ class GeneratePlaylistUseCase @Inject constructor(
                     curve = source.energyCurve,
                     pinnedTrackIds = pinnedIds.toList(),
                     trackCount = source.trackCount,
-                    smoothJoin = smoothJoin,
+                    enableContinuation = enableContinuation,
                     prevLastScore = prevLastScore,
                     prevAxis = prevAxis
                 )

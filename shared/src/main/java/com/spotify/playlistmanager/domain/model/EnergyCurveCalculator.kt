@@ -22,20 +22,22 @@ import kotlin.math.abs
  *
  * Złożoność: O(n × log m) gdzie n = pozycje krzywej, m = rozmiar puli
  *
- * Smooth Join: miękkie przejście między segmentami o tej samej osi score'u —
- * jeśli osie różnią się, smooth join jest pomijany (prevLastScore jest w
- * innej skali score niż bieżący segment).
+ * Kontynuacja: gdy prevLastScore != null i krzywa jest monotoniczna,
+ * wszystkie targety (po auto-range) są przeskalowane tak, żeby segment
+ * zaczynał od prevLastScore i kończył na naturalnym końcu puli.
+ * Kontynuacja pomijana gdy poprzedni segment używał innej osi score'u.
+ * Jeśli zakres jest za mały lub wyczerpany — zwracany jest ContinuationStatus.
  */
 object EnergyCurveCalculator {
 
     /** Tolerancja dla losowego wyboru spośród kandydatów. */
     const val DEFAULT_TOLERANCE = 0.05f
 
-    /** Stała bazowa maxDelta dla smooth join. */
-    private const val SMOOTH_JOIN_BASE_DELTA = 0.15f
+    /** Minimalna różnica start→end, żeby krzywa była uznana za monotoniczną. */
+    private const val MIN_MONOTONIC_NET = 0.10f
 
-    /** Współczynnik proporcjonalny smooth join. */
-    private const val SMOOTH_JOIN_FACTOR = 0.5f
+    /** Minimalny pozostały zakres, poniżej którego emitujemy Warning. */
+    private const val MIN_CONTINUATION_RANGE = 0.08f
 
     /** Minimalna liczba utworów puli, przy której auto-range ma sens. */
     private const val MIN_POOL_FOR_RESCALE = 5
@@ -51,7 +53,7 @@ object EnergyCurveCalculator {
      * @param curve       strategia doboru (kształt + oś)
      * @param trackCount  liczba pozycji do wypełnienia
      * @param tolerance   tolerancja dla shuffle within tolerance
-     * @param smoothJoin  czy zastosować smooth join (tylko gdy `prevAxis == curve.scoreAxis`)
+     * @param enableContinuation czy kontynuować od prevLastScore (tylko gdy `prevAxis == curve.scoreAxis`)
      * @param prevLastScore composite score ostatniego utworu poprzedniego segmentu
      * @param prevAxis    oś, z której pochodzi [prevLastScore] (null = brak poprzedniego segmentu)
      * @return wynik dopasowania
@@ -63,7 +65,7 @@ object EnergyCurveCalculator {
         pinnedTrackIds: List<String> = emptyList(),
         trackCount: Int,
         tolerance: Float = DEFAULT_TOLERANCE,
-        smoothJoin: Boolean = true,
+        enableContinuation: Boolean = true,
         prevLastScore: Float? = null,
         prevAxis: ScoreAxis? = null
     ): SegmentMatchResult {
@@ -115,11 +117,11 @@ object EnergyCurveCalculator {
         val allScores = (scoredPinned + scoredNonPinned).map { it.score }
         val rescaledTargets = rescaleToPoolPercentiles(logicalTargets, allScores)
 
-        // Smooth join: tylko gdy poprzedni segment używał tej samej osi
-        val joinApplicable = smoothJoin && prevAxis == axis
-        val effectiveTargets = applySmoothJoin(
+        // Kontynuacja: tylko gdy poprzedni segment używał tej samej osi
+        val continuationApplicable = enableContinuation && prevAxis == axis
+        val (effectiveTargets, continuationStatus) = applyContinuation(
             rescaledTargets,
-            joinApplicable,
+            continuationApplicable,
             prevLastScore
         )
 
@@ -165,7 +167,7 @@ object EnergyCurveCalculator {
                     MatchedTrack(
                         track = pinned.track,
                         compositeScore = pinned.score,
-                        targetScore = rescaledTargets[idx]
+                        targetScore = effectiveTargets[idx]
                     )
                 )
                 continue
@@ -179,7 +181,7 @@ object EnergyCurveCalculator {
                 MatchedTrack(
                     track = selected.track,
                     compositeScore = selected.score,
-                    targetScore = rescaledTargets[idx]
+                    targetScore = effectiveTargets[idx]
                 )
             )
         }
@@ -195,12 +197,18 @@ object EnergyCurveCalculator {
 
         return SegmentMatchResult(
             tracks = matched,
-            targetScores = rescaledTargets,
+            targetScores = effectiveTargets,
             matchPercentage = matchPercentage,
             lastScore = matched.lastOrNull()?.compositeScore ?: 0f,
-            scoreAxis = axis
+            scoreAxis = axis,
+            continuationStatus = continuationStatus
         )
     }
+
+    private data class ContinuationResult(
+        val effectiveTargets: List<Float>,
+        val status: ContinuationStatus
+    )
 
     /**
      * Skaluj logiczne targety [0..1] do rozkładu puli (p5-p95).
@@ -243,26 +251,66 @@ object EnergyCurveCalculator {
     }
 
     /**
-     * Aplikuje smooth join — modyfikuje target pierwszej pozycji.
+     * Przeskalowuje targety (po auto-range) tak, żeby segment zaczynał od prevLastScore.
+     * Działa tylko dla krzywych monotonicznie rosnących lub malejących
+     * (|naturalEnd - naturalStart| >= MIN_MONOTONIC_NET).
      */
-    private fun applySmoothJoin(
+    private fun applyContinuation(
         targets: List<Float>,
-        smoothJoin: Boolean,
+        enabled: Boolean,
         prevLastScore: Float?
-    ): List<Float> {
-        if (!smoothJoin || prevLastScore == null || targets.isEmpty()) return targets
+    ): ContinuationResult {
+        if (!enabled || prevLastScore == null || targets.isEmpty()) {
+            return ContinuationResult(targets, ContinuationStatus.Ok)
+        }
 
-        val firstTarget = targets[0]
-        val maxDelta = minOf(
-            SMOOTH_JOIN_BASE_DELTA,
-            abs(prevLastScore - firstTarget) * SMOOTH_JOIN_FACTOR
-        )
+        val naturalStart = targets.first()
+        val naturalEnd = targets.last()
+        val netChange = naturalEnd - naturalStart
 
-        val effectiveFirst = (prevLastScore + firstTarget) / 2f
-        // Clamp do maxDelta od oryginalnego target
-        val clamped = firstTarget + (effectiveFirst - firstTarget).coerceIn(-maxDelta, maxDelta)
+        if (abs(netChange) < MIN_MONOTONIC_NET) {
+            // Krzywa niezbyt monotoniczna (fala, trapez, plateau) — nie przeskalowujemy
+            return ContinuationResult(targets, ContinuationStatus.Ok)
+        }
 
-        return listOf(clamped) + targets.drop(1)
+        val ascending = netChange > 0
+
+        if (ascending) {
+            if (prevLastScore <= naturalStart) {
+                return ContinuationResult(targets, ContinuationStatus.Ok)
+            }
+            if (prevLastScore >= naturalEnd) {
+                return ContinuationResult(targets, ContinuationStatus.Impossible(naturalEnd))
+            }
+            val remainingRange = naturalEnd - prevLastScore
+            val rescaled = targets.map { t ->
+                prevLastScore + (t - naturalStart) / netChange * remainingRange
+            }
+            val status = if (remainingRange < MIN_CONTINUATION_RANGE) {
+                ContinuationStatus.Warning(remainingRange)
+            } else {
+                ContinuationStatus.Ok
+            }
+            return ContinuationResult(rescaled, status)
+        } else {
+            // Opadająca
+            if (prevLastScore >= naturalStart) {
+                return ContinuationResult(targets, ContinuationStatus.Ok)
+            }
+            if (prevLastScore <= naturalEnd) {
+                return ContinuationResult(targets, ContinuationStatus.Impossible(naturalEnd))
+            }
+            val remainingRange = prevLastScore - naturalEnd
+            val rescaled = targets.map { t ->
+                prevLastScore + (t - naturalStart) / netChange * remainingRange
+            }
+            val status = if (remainingRange < MIN_CONTINUATION_RANGE) {
+                ContinuationStatus.Warning(remainingRange)
+            } else {
+                ContinuationStatus.Ok
+            }
+            return ContinuationResult(rescaled, status)
+        }
     }
 
     /**

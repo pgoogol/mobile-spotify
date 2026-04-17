@@ -42,7 +42,7 @@ data class GenerateUiState(
     val newPlaylistName: String = "Nowa Playlista",
     val previewTracks: List<Track>? = null,
     val generateResult: GenerateResult? = null,
-    val smoothJoin: Boolean = true,
+    val enableContinuation: Boolean = true,
     val isLoadingPlaylists: Boolean = true,
     val isGenerating: Boolean = false,
     val isSaving: Boolean = false,
@@ -276,7 +276,7 @@ class GenerateViewModel @Inject constructor(
     }
 
     fun onSmoothJoinChange(enabled: Boolean) {
-        _state.update { it.copy(smoothJoin = enabled) }
+        _state.update { it.copy(enableContinuation = enabled) }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -619,7 +619,7 @@ class GenerateViewModel @Inject constructor(
                     val result = runCatching {
                         generatePlaylist.generateWithCurves(
                             sources = sources,
-                            smoothJoin = currentState.smoothJoin,
+                            enableContinuation = currentState.enableContinuation,
                             excludeTrackIds = runningUsedIds
                         )
                     }.getOrElse { e ->
