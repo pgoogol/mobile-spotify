@@ -42,7 +42,7 @@ class FindReplacementsUseCase @Inject constructor(
             sorted.take(maxResults).map { track ->
                 val features = featuresMap[track.id]
                 val score = features
-                    ?.let { CompositeScoreCalculator.calculate(it) }
+                    ?.let { CompositeScoreCalculator.calculate(it, energyCurve.scoreAxis) }
                     ?: CompositeScoreCalculator.DEFAULT_SCORE
                 ReplacementCandidate(
                     track = track,
@@ -56,7 +56,7 @@ class FindReplacementsUseCase @Inject constructor(
                 .map { track ->
                     val features = featuresMap[track.id]
                     val score = features
-                        ?.let { CompositeScoreCalculator.calculate(it) }
+                        ?.let { CompositeScoreCalculator.calculate(it, energyCurve.scoreAxis) }
                         ?: CompositeScoreCalculator.DEFAULT_SCORE
                     ReplacementCandidate(
                         track = track,

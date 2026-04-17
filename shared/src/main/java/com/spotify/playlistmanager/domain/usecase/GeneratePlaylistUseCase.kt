@@ -11,6 +11,7 @@ import com.spotify.playlistmanager.domain.model.ExhaustionStatus
 import com.spotify.playlistmanager.domain.model.GenerateResult
 import com.spotify.playlistmanager.domain.model.HarmonicOptimizer
 import com.spotify.playlistmanager.domain.model.MatchedTrack
+import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.model.SegmentMatchResult
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
@@ -74,6 +75,7 @@ class GeneratePlaylistUseCase @Inject constructor(
         val exhaustionStatuses = mutableListOf<ExhaustionStatus>()
         val exhaustedPlaylists = mutableListOf<ExhaustionStatus>()
         var prevLastScore: Float? = null
+        var prevAxis: ScoreAxis? = null
 
         val runningExclude = excludeTrackIds.toMutableSet()
 
@@ -119,16 +121,21 @@ class GeneratePlaylistUseCase @Inject constructor(
                     val score = featuresMap[track.id]
                         ?.let { CompositeScoreCalculator.calculate(it) }
                         ?: CompositeScoreCalculator.DEFAULT_SCORE
-                    MatchedTrack(track, score, 0f)
+                    // targetScore = actualScore: brak krzywej → utwór "celuje" w swój własny score
+                    MatchedTrack(track, score, score)
                 }
                 allSegments.add(
                     SegmentMatchResult(
                         tracks = matchedTracks,
                         targetScores = emptyList(),
                         matchPercentage = 1f,
-                        lastScore = matchedTracks.lastOrNull()?.compositeScore ?: 0f
+                        lastScore = matchedTracks.lastOrNull()?.compositeScore ?: 0f,
+                        scoreAxis = ScoreAxis.DANCE
                     )
                 )
+                // None curve — brak spójności osi dla smooth join z następnym segmentem
+                prevLastScore = null
+                prevAxis = null
             } else {
                 val featuresMap = loadFeaturesMap(available)
                 val segment = EnergyCurveCalculator.matchTracks(
@@ -138,7 +145,8 @@ class GeneratePlaylistUseCase @Inject constructor(
                     pinnedTrackIds = pinnedIds.toList(),
                     trackCount = source.trackCount,
                     smoothJoin = smoothJoin,
-                    prevLastScore = prevLastScore
+                    prevLastScore = prevLastScore,
+                    prevAxis = prevAxis
                 )
 
                 // ── Optymalizacja harmoniczna (opcjonalna) ────────────────
@@ -156,10 +164,13 @@ class GeneratePlaylistUseCase @Inject constructor(
                 newlyUsedIds.addAll(takenIds)
                 runningExclude.addAll(takenIds)
                 prevLastScore = finalSegment.lastScore
+                prevAxis = finalSegment.scoreAxis
             }
 
+            // Kumulatywna liczba użytych: wszystkie tracki tej playlisty
+            // które są w runningExclude (= poprzednie rundy + właśnie wzięte)
             val sourceTrackIds = sourceTracks.mapNotNull { it.id }.toSet()
-            val usedFromSource = takenIds.count { it in sourceTrackIds }
+            val usedFromSource = sourceTrackIds.count { it in runningExclude }
             exhaustionStatuses.add(
                 ExhaustionStatus(
                     playlistId = playlistId,

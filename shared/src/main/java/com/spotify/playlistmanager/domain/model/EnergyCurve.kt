@@ -4,441 +4,313 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Krzywe energii do generowania playlist.
+ * Strategia doboru utworów do segmentu playlisty.
  *
- * Każda krzywa definiuje kształt docelowych composite score'ów
- * dla kolejnych pozycji w segmencie playlisty.
+ * Każda strategia definiuje dwa wymiary:
  *
- * Composite score = 0.45 × bpmNorm + 0.35 × energyNorm + 0.20 × danceNorm
+ * 1. **Kształt** — [generateTargets] zwraca listę docelowych score'ów [0..1]
+ *    dla kolejnych pozycji w segmencie. Matcher szuka w puli utworów o score
+ *    najbliższym do targetu (po skalowaniu do rozkładu puli — patrz
+ *    [EnergyCurveCalculator.matchTracks]).
  *
- * Krzywe są pogrupowane przez [CurveGroup]:
- * - [CurveGroup.SALSA]: wyższe BPM (composite ~0.45–1.00)
- * - [CurveGroup.BACHATA]: niższe BPM (composite ~0.20–0.60)
- * - [CurveGroup.UNIVERSAL]: niezależne od stylu, szeroki zakres
- * - [CurveGroup.NONE]: brak krzywej (sortowanie)
+ * 2. **Oś** — [scoreAxis] określa, która funkcja score'uje utwory:
+ *    - [ScoreAxis.DANCE] = BPM + energy + danceability (jak mocno się tańczy)
+ *    - [ScoreAxis.MOOD]  = valence + acousticness-inv + dance (klimat/nastrój)
+ *
+ * Strategia = para (shape, axis). Niektóre strategie mają swoje minimalne N
+ * (np. Arc/Valley wymagają min 3 utworów — poniżej degradują do Rising/Falling).
+ *
+ * Klasa zachowuje nazwę `EnergyCurve` ze względu na szeroką istniejącą
+ * integrację (serializacja, UI, chart). Semantycznie to dziś „strategia
+ * segmentu", nie tylko krzywa energii.
  */
 @Serializable
 sealed class EnergyCurve {
 
-    /** Wyświetlana nazwa krzywej z emoji. */
+    /** Wyświetlana nazwa strategii z emoji. */
     abstract val displayName: String
 
-    /** Krótki opis kształtu dla UI. */
+    /** Krótki opis dla UI (podpowiedź kiedy użyć). */
     abstract val description: String
 
-    /** Grupa tematyczna krzywej (salsa / bachata / uniwersalne). */
-    abstract val group: CurveGroup
+    /** Oś dopasowania — DANCE lub MOOD. Domyślnie DANCE. */
+    open val scoreAxis: ScoreAxis = ScoreAxis.DANCE
+
+    /**
+     * Minimalna liczba utworów, przy której strategia ma sens.
+     * Poniżej — matcher degraduje do prostszej strategii (patrz [degradeFor]).
+     */
+    open val minTrackCount: Int = 2
 
     /**
      * Generuje listę docelowych score'ów [0..1] dla podanej liczby pozycji.
+     * Skalowanie do rozkładu puli robi [EnergyCurveCalculator].
+     *
      * @param trackCount liczba pozycji w segmencie
-     * @return lista target score'ów o rozmiarze [trackCount]
+     * @return lista logicznych target score'ów o rozmiarze [trackCount]
      */
     abstract fun generateTargets(trackCount: Int): List<Float>
 
+    /**
+     * Degradacja dla segmentów mniejszych niż [minTrackCount].
+     * Domyślnie: zwraca siebie. Nadpisywane przez Arc/Valley.
+     */
+    open fun degradeFor(trackCount: Int): EnergyCurve = this
+
     // ════════════════════════════════════════════════════════
-    //  Brak krzywej — standardowe sortowanie
+    //  Brak — sortowanie bez dopasowania
     // ════════════════════════════════════════════════════════
 
     @Serializable
     @SerialName("none")
     data object None : EnergyCurve() {
         override val displayName = "Brak"
-        override val description = "Standardowe sortowanie bez krzywej energii"
-        override val group = CurveGroup.NONE
+        override val description = "Sortowanie wg ustawień (popularność/długość/…), bez dopasowania"
+        override val minTrackCount = 1
         override fun generateTargets(trackCount: Int): List<Float> = emptyList()
     }
 
     // ════════════════════════════════════════════════════════
-    //  SalsaRomantica 🌹 — liniowe narastanie 0.25 → 0.55
+    //  Rising ↗ — energia rośnie od początku do końca
     // ════════════════════════════════════════════════════════
 
     @Serializable
-    @SerialName("salsa_romantica")
-    data object SalsaRomantica : EnergyCurve() {
-        override val displayName = "🌹 Salsa Romántica"
-        override val description = "Liniowe narastanie 0.25 → 0.55"
-        override val group = CurveGroup.SALSA
+    @SerialName("rising")
+    data object Rising : EnergyCurve() {
+        override val displayName = "↗ Narastająco"
+        override val description = "Energia taneczna rośnie od najsłabszego do najmocniejszego utworu"
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.40f) // środek zakresu
-            return List(trackCount) { i ->
-                val t = i.toFloat() / (trackCount - 1)
-                0.25f + t * 0.30f // 0.25 → 0.55
-            }
+            if (trackCount == 1) return listOf(0.5f)
+            return List(trackCount) { i -> i.toFloat() / (trackCount - 1) }
         }
     }
 
     // ════════════════════════════════════════════════════════
-    //  SalsaClasica 🎺 — trapez: rozgrzewka → plateau → zejście
+    //  Falling ↘ — energia opada
     // ════════════════════════════════════════════════════════
 
     @Serializable
-    @SerialName("salsa_clasica")
-    data object SalsaClasica : EnergyCurve() {
-        override val displayName = "🎺 Salsa Clásica"
-        override val description = "Trapez: rozgrzewka → plateau → zejście"
-        override val group = CurveGroup.SALSA
+    @SerialName("falling")
+    data object Falling : EnergyCurve() {
+        override val displayName = "↘ Opadająco"
+        override val description = "Energia opada — od najmocniejszego do najspokojniejszego"
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.65f)
-
-            // Podział: 25% rozgrzewka, 50% plateau, 25% zejście
-            val rampUp   = (trackCount * 0.25f).toInt().coerceAtLeast(1)
-            val rampDown = (trackCount * 0.25f).toInt().coerceAtLeast(1)
-            val plateau  = trackCount - rampUp - rampDown
-
-            return List(trackCount) { i ->
-                when {
-                    i < rampUp -> {
-                        // Rozgrzewka: 0.45 → 0.70
-                        val t = i.toFloat() / rampUp
-                        0.45f + t * 0.25f
-                    }
-                    i < rampUp + plateau -> {
-                        // Plateau: stałe 0.70
-                        0.70f
-                    }
-                    else -> {
-                        // Zejście: 0.70 → 0.55
-                        val t = (i - rampUp - plateau).toFloat() / rampDown.coerceAtLeast(1)
-                        0.70f - t * 0.15f
-                    }
-                }
-            }
+            if (trackCount == 1) return listOf(0.5f)
+            return List(trackCount) { i -> 1f - i.toFloat() / (trackCount - 1) }
         }
     }
 
     // ════════════════════════════════════════════════════════
-    //  SalsaRapida ⚡ — crescendo kwadratowe 0.50 → 0.95
+    //  Stable ━ — wszystkie utwory w okolicy wybranego poziomu
     // ════════════════════════════════════════════════════════
 
     @Serializable
-    @SerialName("salsa_rapida")
-    data object SalsaRapida : EnergyCurve() {
-        override val displayName = "⚡ Salsa Rápida"
-        override val description = "Crescendo kwadratowe 0.50 → 0.95"
-        override val group = CurveGroup.SALSA
+    @SerialName("stable")
+    data class Stable(val level: StableLevel = StableLevel.MID) : EnergyCurve() {
+        override val displayName get() = "━ Stabilnie · ${level.label}"
+        override val description = "Wszystkie utwory o podobnym tempie — tanda, blok jednolity"
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.725f)
-            return List(trackCount) { i ->
-                val t = i.toFloat() / (trackCount - 1)
-                // Kwadratowe: score = 0.50 + 0.45 × t²
-                0.50f + 0.45f * t * t
-            }
+            return List(trackCount) { level.target }
         }
     }
 
     // ════════════════════════════════════════════════════════
-    //  Timba 🔥 — asymetryczna fala clave 3-2
+    //  Arc 🎢 — rise-peak-fall w obrębie segmentu
     // ════════════════════════════════════════════════════════
 
     @Serializable
-    @SerialName("timba")
-    data object Timba : EnergyCurve() {
-        override val displayName = "🔥 Timba"
-        override val description = "Fala clave 3-2: dwa asymetryczne piki"
-        override val group = CurveGroup.SALSA
+    @SerialName("arc")
+    data object Arc : EnergyCurve() {
+        override val displayName = "🎢 Łuk"
+        override val description = "Narasta → pik → opada — stand-alone runda z pełnym łukiem"
+        override val minTrackCount = 3
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.85f)
+            if (trackCount == 1) return listOf(1f)
+            if (trackCount == 2) return listOf(0.25f, 1f)
 
-            // Clave 3-2: podziel na fazę "3" (60% tracków) i fazę "2" (40%)
-            // Faza 3: dwa szybkie piki sinusoidalne
-            // Faza 2: jeden szeroki pik sinusoidalny
-            // Base = 0.75, amplituda = 0.20
-            val phase3Count = (trackCount * 0.6f).toInt().coerceAtLeast(1)
-
+            // Pik w 65% długości (lekka asymetria — dłużej rozkręca niż schodzi)
+            val peakIdx = ((trackCount - 1) * 0.65f).toInt().coerceIn(1, trackCount - 2)
             return List(trackCount) { i ->
-                val base = 0.75f
-                val amplitude = 0.20f
-
-                if (i < phase3Count) {
-                    // Faza "3": dwa piki na pozycjach 1/3 i 2/3
-                    val t = i.toFloat() / phase3Count
-                    base + amplitude * kotlin.math.sin(2.0 * Math.PI * 2.0 * t).toFloat().coerceIn(-1f, 1f)
+                if (i <= peakIdx) {
+                    val t = i.toFloat() / peakIdx
+                    0.25f + t * 0.75f  // 0.25 → 1.0
                 } else {
-                    // Faza "2": jeden pik sinusoidalny
-                    val t = (i - phase3Count).toFloat() / (trackCount - phase3Count).coerceAtLeast(1)
-                    base + amplitude * kotlin.math.sin(Math.PI * t).toFloat()
+                    val denom = (trackCount - 1 - peakIdx).coerceAtLeast(1)
+                    val t = (i - peakIdx).toFloat() / denom
+                    1f - t * 0.60f     // 1.0 → 0.40
                 }
             }
         }
+
+        override fun degradeFor(trackCount: Int): EnergyCurve =
+            if (trackCount < minTrackCount) Rising else this
     }
 
     // ════════════════════════════════════════════════════════
-    //  BachataRise 🌴 — liniowe narastanie 0.20 → 0.45
+    //  Valley 🌀 — fall-bottom-rise (intermezzo, oddech)
     // ════════════════════════════════════════════════════════
 
     @Serializable
-    @SerialName("bachata_rise")
-    data object BachataRise : EnergyCurve() {
-        override val displayName = "🌴 Bachata — Narastanie"
-        override val description = "Liniowe narastanie 0.20 → 0.45"
-        override val group = CurveGroup.BACHATA
+    @SerialName("valley")
+    data object Valley : EnergyCurve() {
+        override val displayName = "🌀 Dolina"
+        override val description = "Opada → dno → narasta — moment oddechu w środku segmentu"
+        override val minTrackCount = 3
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.325f) // środek zakresu
+            if (trackCount == 1) return listOf(0.3f)
+            if (trackCount == 2) return listOf(0.9f, 0.3f)
+
+            // Dno w środku
+            val bottomIdx = (trackCount - 1) / 2
             return List(trackCount) { i ->
-                val t = i.toFloat() / (trackCount - 1)
-                0.20f + t * 0.25f // 0.20 → 0.45
-            }
-        }
-    }
-
-    // ════════════════════════════════════════════════════════
-    //  BachataArc 🌴 — trapez niski 0.35 → 0.60 → 0.50
-    // ════════════════════════════════════════════════════════
-
-    @Serializable
-    @SerialName("bachata_arc")
-    data object BachataArc : EnergyCurve() {
-        override val displayName = "🌴 Bachata — Łuk"
-        override val description = "Trapez niski: 0.35 → 0.60 → 0.50"
-        override val group = CurveGroup.BACHATA
-
-        override fun generateTargets(trackCount: Int): List<Float> {
-            if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.55f)
-
-            // Podział: 25% rozgrzewka, 50% plateau, 25% zejście
-            val rampUp   = (trackCount * 0.25f).toInt().coerceAtLeast(1)
-            val rampDown = (trackCount * 0.25f).toInt().coerceAtLeast(1)
-            val plateau  = trackCount - rampUp - rampDown
-
-            return List(trackCount) { i ->
-                when {
-                    i < rampUp -> {
-                        // Rozgrzewka: 0.35 → 0.60
-                        val t = i.toFloat() / rampUp
-                        0.35f + t * 0.25f
-                    }
-                    i < rampUp + plateau -> {
-                        // Plateau: stałe 0.60
-                        0.60f
-                    }
-                    else -> {
-                        // Zejście: 0.60 → 0.50
-                        val t = (i - rampUp - plateau).toFloat() / rampDown.coerceAtLeast(1)
-                        0.60f - t * 0.10f
-                    }
-                }
-            }
-        }
-    }
-
-    // ════════════════════════════════════════════════════════
-    //  Crescendo 📈 — liniowe 0.30 → 0.85, uniwersalne
-    // ════════════════════════════════════════════════════════
-
-    @Serializable
-    @SerialName("crescendo")
-    data object Crescendo : EnergyCurve() {
-        override val displayName = "📈 Crescendo"
-        override val description = "Liniowy wzrost 0.30 → 0.85"
-        override val group = CurveGroup.UNIVERSAL
-
-        override fun generateTargets(trackCount: Int): List<Float> {
-            if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.575f) // środek zakresu
-            return List(trackCount) { i ->
-                val t = i.toFloat() / (trackCount - 1)
-                0.30f + t * 0.55f // 0.30 → 0.85
-            }
-        }
-    }
-
-    // ════════════════════════════════════════════════════════
-    //  Peak 🎢 — trójkąt symetryczny 0.35 → 0.80 → 0.40
-    // ════════════════════════════════════════════════════════
-
-    @Serializable
-    @SerialName("peak")
-    data object Peak : EnergyCurve() {
-        override val displayName = "🎢 Szczyt"
-        override val description = "Trójkąt symetryczny: 0.35 → 0.80 → 0.40"
-        override val group = CurveGroup.UNIVERSAL
-
-        override fun generateTargets(trackCount: Int): List<Float> {
-            if (trackCount <= 0) return emptyList()
-            if (trackCount == 1) return listOf(0.80f)
-
-            // Szczyt w środku (lub tuż za środkiem dla parzystej liczby)
-            val peakIndex = trackCount / 2
-            return List(trackCount) { i ->
-                if (i <= peakIndex) {
-                    // Wznoszenie 0.35 → 0.80
-                    val t = if (peakIndex == 0) 1f else i.toFloat() / peakIndex
-                    0.35f + t * 0.45f
+                if (i <= bottomIdx) {
+                    val t = i.toFloat() / bottomIdx.coerceAtLeast(1)
+                    0.9f - t * 0.6f    // 0.9 → 0.3
                 } else {
-                    // Opadanie 0.80 → 0.40
-                    val denom = (trackCount - 1 - peakIndex).coerceAtLeast(1)
-                    val t = (i - peakIndex).toFloat() / denom
-                    0.80f - t * 0.40f
+                    val denom = (trackCount - 1 - bottomIdx).coerceAtLeast(1)
+                    val t = (i - bottomIdx).toFloat() / denom
+                    0.3f + t * 0.5f    // 0.3 → 0.8
                 }
             }
         }
+
+        override fun degradeFor(trackCount: Int): EnergyCurve =
+            if (trackCount < minTrackCount) Falling else this
     }
 
     // ════════════════════════════════════════════════════════
-    //  Wave ∿ — konfigurowalna fala sinusoidalna
-    //  Parametr [center] decyduje o grupie (bachata/uniwersalne/salsa)
-    //  i displayName (liczony dynamicznie).
+    //  Wave ∿ — parametryczna sinusoida
     // ════════════════════════════════════════════════════════
 
     @Serializable
     @SerialName("wave")
     data class Wave(
         val direction: WaveDirection = WaveDirection.RISING,
-        val tracksPerHalfWave: Int = 3,
-        val center: Float = DEFAULT_CENTER
+        val tracksPerHalfWave: Int = 3
     ) : EnergyCurve() {
 
         override val displayName: String
-            get() {
-                val arrow = when (direction) {
-                    WaveDirection.RISING  -> "↗"
-                    WaveDirection.FALLING -> "↘"
-                }
-                return when (group) {
-                    CurveGroup.BACHATA   -> "🌴 Bachata — Fala $arrow"
-                    CurveGroup.SALSA     -> "🎺 Salsa — Fala $arrow"
-                    CurveGroup.UNIVERSAL -> "∿ Uniwersalne — Fala $arrow"
-                    CurveGroup.NONE      -> "Fala $arrow" // nieosiągalne
-                }
-            }
+            get() = "∿ Fala ${direction.arrow}"
 
         override val description: String
-            get() = "Sinusoida ${direction.label}, center=${"%.2f".format(center)}, " +
-                    "${tracksPerHalfWave} utw./półfalę"
-
-        override val group: CurveGroup
-            get() = when {
-                center < BACHATA_UPPER -> CurveGroup.BACHATA
-                center > UNIVERSAL_UPPER -> CurveGroup.SALSA
-                else -> CurveGroup.UNIVERSAL
-            }
+            get() = "Sinusoida ${direction.label} wokół mediany, " +
+                    "$tracksPerHalfWave utw. na półfalę"
 
         val fullWaveSize: Int get() = tracksPerHalfWave * 4
-
-        /**
-         * Amplituda dobrana tak, aby fala nigdy nie wyszła poza [0, 1]
-         * niezależnie od wartości [center]. Dla center=0.50 amplituda = 0.30
-         * (zachowuje zachowanie sprzed refaktoru).
-         */
-        val amplitude: Float
-            get() {
-                val safeMargin = minOf(center, 1f - center)
-                return minOf(0.30f, safeMargin * 0.85f)
-            }
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
 
             val fws = fullWaveSize
-            val amp = amplitude
+            val center = 0.5f
+            val amplitude = 0.3f
             return List(trackCount) { i ->
                 val angle = 2.0 * Math.PI * i.toDouble() / fws
                 val sin = kotlin.math.sin(angle).toFloat()
                 when (direction) {
-                    WaveDirection.RISING  -> center + amp * sin
-                    WaveDirection.FALLING -> center - amp * sin
+                    WaveDirection.RISING  -> center + amplitude * sin
+                    WaveDirection.FALLING -> center - amplitude * sin
                 }
             }
         }
+    }
 
-        companion object {
-            const val DEFAULT_CENTER = 0.50f
-            /** Wartości <= tego progu klasyfikują falę jako BACHATA. */
-            const val BACHATA_UPPER = 0.45f
-            /** Wartości > tego progu klasyfikują falę jako SALSA. */
-            const val UNIVERSAL_UPPER = 0.60f
+    // ════════════════════════════════════════════════════════
+    //  Romantic 🌹 — top wg MOOD, stabilnie wysoko
+    // ════════════════════════════════════════════════════════
 
-            /** Preset: fala bachatowa. */
-            const val CENTER_BACHATA = 0.35f
-            /** Preset: fala uniwersalna (zachowuje zachowanie sprzed refaktoru). */
-            const val CENTER_UNIVERSAL = 0.50f
-            /** Preset: fala salsowa. */
-            const val CENTER_SALSA = 0.70f
+    @Serializable
+    @SerialName("romantic")
+    data object Romantic : EnergyCurve() {
+        override val displayName = "🌹 Romantycznie"
+        override val description = "Utwory o najwyższym klimacie (valence + dance) — tanda romantyczna"
+        override val scoreAxis = ScoreAxis.MOOD
+
+        override fun generateTargets(trackCount: Int): List<Float> {
+            if (trackCount <= 0) return emptyList()
+            // Wszystkie targety w górnym ekstremum MOOD — matcher wybierze top-N
+            return List(trackCount) { 1f }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  Calm 🌙 — od najmroczniejszych klimatów do średnich
+    // ════════════════════════════════════════════════════════
+
+    @Serializable
+    @SerialName("calm")
+    data object Calm : EnergyCurve() {
+        override val displayName = "🌙 Spokojnie"
+        override val description = "Od najbardziej nastrojowych do spokojniejszych — finał wieczoru"
+        override val scoreAxis = ScoreAxis.MOOD
+
+        override fun generateTargets(trackCount: Int): List<Float> {
+            if (trackCount <= 0) return emptyList()
+            if (trackCount == 1) return listOf(0.6f)
+            return List(trackCount) { i ->
+                val t = i.toFloat() / (trackCount - 1)
+                1f - t * 0.7f  // 1.0 → 0.3
+            }
         }
     }
 
     companion object {
         /**
-         * Wszystkie predefiniowane krzywe (płaska lista).
-         * Używane przez historię rund, serializację testów i miejsca,
-         * które nie potrzebują grupowania.
-         *
-         * Dla UI dropdownu preferuj [groupedPresets].
+         * Wszystkie predefiniowane strategie w kolejności sensownej dla UI:
+         * None → shape-based (rising → falling → stable → arc → valley → wave)
+         * → mood-based (romantic → calm).
          */
         val presets: List<EnergyCurve> get() = listOf(
             None,
-            // SALSA
-            SalsaRomantica,
-            SalsaClasica,
-            SalsaRapida,
-            Timba,
-            Wave(direction = WaveDirection.RISING,  center = Wave.CENTER_SALSA),
-            Wave(direction = WaveDirection.FALLING, center = Wave.CENTER_SALSA),
-            // BACHATA
-            BachataRise,
-            BachataArc,
-            Wave(direction = WaveDirection.RISING,  center = Wave.CENTER_BACHATA),
-            Wave(direction = WaveDirection.FALLING, center = Wave.CENTER_BACHATA),
-            // UNIVERSAL
-            Crescendo,
-            Peak,
-            Wave(direction = WaveDirection.RISING,  center = Wave.CENTER_UNIVERSAL),
-            Wave(direction = WaveDirection.FALLING, center = Wave.CENTER_UNIVERSAL),
+            Rising,
+            Falling,
+            Stable(),
+            Arc,
+            Valley,
+            Wave(direction = WaveDirection.RISING),
+            Wave(direction = WaveDirection.FALLING),
+            Romantic,
+            Calm,
         )
-
-        /**
-         * Presety pogrupowane wg [CurveGroup], z zachowaniem kolejności:
-         * NONE → SALSA → BACHATA → UNIVERSAL.
-         *
-         * Używane przez UI dropdownu do renderowania sekcji.
-         */
-        val groupedPresets: Map<CurveGroup, List<EnergyCurve>> get() {
-            val byGroup = presets.groupBy { it.group }
-            // LinkedHashMap zachowuje kolejność kluczy
-            val ordered = linkedMapOf<CurveGroup, List<EnergyCurve>>()
-            listOf(CurveGroup.NONE, CurveGroup.SALSA, CurveGroup.BACHATA, CurveGroup.UNIVERSAL)
-                .forEach { g -> byGroup[g]?.let { ordered[g] = it } }
-            return ordered
-        }
     }
 }
 
-/**
- * Grupa tematyczna krzywej energii. Służy do wizualnego grupowania
- * w UI (nagłówki sekcji w dropdownie) oraz do dynamicznego wyliczania
- * [EnergyCurve.Wave.displayName] na podstawie parametru `center`.
- */
 @Serializable
-enum class CurveGroup(val displayName: String) {
-    @SerialName("none")
-    NONE("Brak"),
+enum class WaveDirection(val label: String, val arrow: String) {
+    @SerialName("rising")
+    RISING("rosnąca", "↗"),
 
-    @SerialName("salsa")
-    SALSA("🎺 Salsa"),
-
-    @SerialName("bachata")
-    BACHATA("🌴 Bachata"),
-
-    @SerialName("universal")
-    UNIVERSAL("⚙️ Uniwersalne"),
+    @SerialName("falling")
+    FALLING("opadająca", "↘")
 }
 
+/**
+ * Poziom energii dla strategii [EnergyCurve.Stable].
+ *
+ * Definiuje logical target score [0..1], który po auto-range (p5-p95 puli)
+ * mapuje na:
+ * - [LOW]  = dolny kwartyl puli (spokojny blok)
+ * - [MID]  = mediana puli (neutralny)
+ * - [HIGH] = górny kwartyl puli (mocny blok)
+ */
 @Serializable
-enum class WaveDirection(val label: String) {
-    @SerialName("rising")
-    RISING("rosnąca ↗"),
-    @SerialName("falling")
-    FALLING("opadająca ↘")
+enum class StableLevel(val target: Float, val label: String) {
+    @SerialName("low")
+    LOW(0.25f, "Niski"),
+
+    @SerialName("mid")
+    MID(0.50f, "Środkowy"),
+
+    @SerialName("high")
+    HIGH(0.75f, "Wysoki")
 }

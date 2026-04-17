@@ -5,20 +5,26 @@ import com.spotify.playlistmanager.data.model.TrackAudioFeatures
 import kotlin.math.abs
 
 /**
- * Algorytm dopasowania utworów do krzywej energii.
+ * Algorytm dopasowania utworów do strategii ([EnergyCurve]) jednego segmentu.
  *
  * Strategia:
- *  1. Oblicz composite score dla każdego utworu z puli
- *  2. Posortuj pulę po composite score (raz)
- *  3. Dla każdej pozycji krzywej: binary search najbliższego kandydata
- *  4. Shuffle within tolerance: jeśli kilka utworów mieści się w tolerancji,
- *     losowy wybór spośród nich
+ *  1. Degrade strategii dla małych segmentów (Arc/Valley z <3 utworów → Rising/Falling)
+ *  2. Oblicz score dla każdego utworu wg [EnergyCurve.scoreAxis] (DANCE lub MOOD)
+ *  3. Auto-range: skaluj logiczne targety krzywej [0..1] do rozkładu p5-p95 puli
+ *  4. Posortuj pulę po score (raz)
+ *  5. Dla każdej pozycji: binary search najbliższego kandydata z tolerancją 0.05
+ *  6. Shuffle within tolerance: losowy wybór spośród kandydatów w zakresie
+ *
+ * Auto-range sprawia, że strategia „Narastająco" w bachatowej playliście
+ * (composite ~0.15–0.35) zmatchuje tracki w jej rozpiętości, a nie próbuje
+ * sięgnąć 0.9 (którego tam nie ma). Analogicznie dla MOOD axis i strategii
+ * Romantic/Calm.
  *
  * Złożoność: O(n × log m) gdzie n = pozycje krzywej, m = rozmiar puli
  *
- * Smooth Join: miękkie przejście między segmentami — efektywny target
- * pierwszego utworu segmentu B uwzględnia ostatni score segmentu A.
- * maxDelta = min(0.15, |prevLastScore - target[0]| × 0.5)
+ * Smooth Join: miękkie przejście między segmentami o tej samej osi score'u —
+ * jeśli osie różnią się, smooth join jest pomijany (prevLastScore jest w
+ * innej skali score niż bieżący segment).
  */
 object EnergyCurveCalculator {
 
@@ -31,16 +37,23 @@ object EnergyCurveCalculator {
     /** Współczynnik proporcjonalny smooth join. */
     private const val SMOOTH_JOIN_FACTOR = 0.5f
 
+    /** Minimalna liczba utworów puli, przy której auto-range ma sens. */
+    private const val MIN_POOL_FOR_RESCALE = 5
+
+    /** Minimalna rozpiętość p95-p5, przy której auto-range ma sens. */
+    private const val MIN_RANGE_FOR_RESCALE = 0.10f
+
     /**
-     * Dopasowuje utwory z puli do krzywej energii jednego segmentu.
+     * Dopasowuje utwory z puli do strategii segmentu.
      *
      * @param tracks      pula dostępnych utworów
      * @param featuresMap mapa spotifyTrackId → audio features
-     * @param curve       krzywa energii
+     * @param curve       strategia doboru (kształt + oś)
      * @param trackCount  liczba pozycji do wypełnienia
      * @param tolerance   tolerancja dla shuffle within tolerance
-     * @param smoothJoin  czy zastosować smooth join
-     * @param prevLastScore composite score ostatniego utworu poprzedniego segmentu (null = brak)
+     * @param smoothJoin  czy zastosować smooth join (tylko gdy `prevAxis == curve.scoreAxis`)
+     * @param prevLastScore composite score ostatniego utworu poprzedniego segmentu
+     * @param prevAxis    oś, z której pochodzi [prevLastScore] (null = brak poprzedniego segmentu)
      * @return wynik dopasowania
      */
     fun matchTracks(
@@ -51,44 +64,66 @@ object EnergyCurveCalculator {
         trackCount: Int,
         tolerance: Float = DEFAULT_TOLERANCE,
         smoothJoin: Boolean = true,
-        prevLastScore: Float? = null
+        prevLastScore: Float? = null,
+        prevAxis: ScoreAxis? = null
     ): SegmentMatchResult {
-        val targets = curve.generateTargets(trackCount)
+        // Degrade strategii dla krótkich segmentów (Arc/Valley → Rising/Falling)
+        val effectiveCurve = curve.degradeFor(trackCount)
+        val axis = effectiveCurve.scoreAxis
+
+        val logicalTargets = effectiveCurve.generateTargets(trackCount)
 
         // Rozdziel pulę na pinned i non-pinned
         val pinnedSet = pinnedTrackIds.toSet()
         val pinnedTracks = tracks.filter { it.id in pinnedSet }
         val nonPinnedTracks = tracks.filter { it.id !in pinnedSet }
 
-        if (targets.isEmpty()) {
-            // Krzywa None — pinned na początku, reszta dopełniona
+        if (logicalTargets.isEmpty()) {
+            // Strategia None — pinned na początku, reszta dopełniona
             val remaining = trackCount - pinnedTracks.size
             val taken = pinnedTracks + nonPinnedTracks.take(remaining.coerceAtLeast(0))
             return SegmentMatchResult(
                 tracks = taken.map { track ->
                     val score = featuresMap[track.id]
-                        ?.let { CompositeScoreCalculator.calculate(it) }
+                        ?.let { CompositeScoreCalculator.calculate(it, axis) }
                         ?: CompositeScoreCalculator.DEFAULT_SCORE
                     MatchedTrack(track, score, 0f)
                 },
                 targetScores = emptyList(),
                 matchPercentage = 1f,
-                lastScore = 0f
+                lastScore = 0f,
+                scoreAxis = axis
             )
         }
 
-        // ── Faza 1: Przypisz pinned tracks do optymalnych pozycji ────
+        // ── Scoring puli wg wybranej osi ─────────────────────────────
         val scoredPinned = pinnedTracks.map { track ->
             val score = featuresMap[track.id]
-                ?.let { CompositeScoreCalculator.calculate(it) }
+                ?.let { CompositeScoreCalculator.calculate(it, axis) }
                 ?: CompositeScoreCalculator.DEFAULT_SCORE
             ScoredTrack(track, score)
         }
 
-        // Modyfikuj targets z smooth join
-        val effectiveTargets = applySmoothJoin(targets, smoothJoin, prevLastScore)
+        val scoredNonPinned = nonPinnedTracks.map { track ->
+            val score = featuresMap[track.id]
+                ?.let { CompositeScoreCalculator.calculate(it, axis) }
+                ?: CompositeScoreCalculator.DEFAULT_SCORE
+            ScoredTrack(track, score)
+        }
 
-        // Greedy: przypisz pinned track do pozycji z najmniejszą |score - target|
+        // ── Auto-range: skaluj logiczne targety do rozkładu puli ────
+        val allScores = (scoredPinned + scoredNonPinned).map { it.score }
+        val rescaledTargets = rescaleToPoolPercentiles(logicalTargets, allScores)
+
+        // Smooth join: tylko gdy poprzedni segment używał tej samej osi
+        val joinApplicable = smoothJoin && prevAxis == axis
+        val effectiveTargets = applySmoothJoin(
+            rescaledTargets,
+            joinApplicable,
+            prevLastScore
+        )
+
+        // ── Faza 1: Przypisz pinned tracks do optymalnych pozycji ────
         data class PinnedCandidate(
             val track: ScoredTrack,
             val position: Int,
@@ -119,14 +154,8 @@ object EnergyCurveCalculator {
         }
 
         // ── Faza 2: Wypełnij wolne sloty z puli (bez pinned) ─────────
-        val scoredPool = nonPinnedTracks.map { track ->
-            val score = featuresMap[track.id]
-                ?.let { CompositeScoreCalculator.calculate(it) }
-                ?: CompositeScoreCalculator.DEFAULT_SCORE
-            ScoredTrack(track, score)
-        }.sortedBy { it.score }
-
-        val available = scoredPool.toMutableList()
+        val sortedPool = scoredNonPinned.sortedBy { it.score }
+        val available = sortedPool.toMutableList()
         val matched = mutableListOf<MatchedTrack>()
 
         for ((idx, target) in effectiveTargets.withIndex()) {
@@ -136,7 +165,7 @@ object EnergyCurveCalculator {
                     MatchedTrack(
                         track = pinned.track,
                         compositeScore = pinned.score,
-                        targetScore = targets[idx]  // oryginalne targety do wykresu
+                        targetScore = rescaledTargets[idx]
                     )
                 )
                 continue
@@ -150,12 +179,12 @@ object EnergyCurveCalculator {
                 MatchedTrack(
                     track = selected.track,
                     compositeScore = selected.score,
-                    targetScore = targets[idx]
+                    targetScore = rescaledTargets[idx]
                 )
             )
         }
 
-        // Procent dopasowania
+        // Procent dopasowania — oba wymiary w tej samej skali (rescaled)
         val matchPercentage = if (matched.isEmpty()) 1f
         else {
             val avgDeviation = matched.map {
@@ -166,10 +195,51 @@ object EnergyCurveCalculator {
 
         return SegmentMatchResult(
             tracks = matched,
-            targetScores = targets,
+            targetScores = rescaledTargets,
             matchPercentage = matchPercentage,
-            lastScore = matched.lastOrNull()?.compositeScore ?: 0f
+            lastScore = matched.lastOrNull()?.compositeScore ?: 0f,
+            scoreAxis = axis
         )
+    }
+
+    /**
+     * Skaluj logiczne targety [0..1] do rozkładu puli (p5-p95).
+     *
+     * Fallback (brak rescale) gdy:
+     * - pula zbyt mała (< MIN_POOL_FOR_RESCALE)
+     * - rozpiętość p95-p5 za wąska (< MIN_RANGE_FOR_RESCALE)
+     *
+     * Visible for testing.
+     */
+    internal fun rescaleToPoolPercentiles(
+        logicalTargets: List<Float>,
+        poolScores: List<Float>
+    ): List<Float> {
+        if (logicalTargets.isEmpty() || poolScores.size < MIN_POOL_FOR_RESCALE) {
+            return logicalTargets
+        }
+        val sorted = poolScores.sorted()
+        val p5 = percentile(sorted, 0.05f)
+        val p95 = percentile(sorted, 0.95f)
+        val range = p95 - p5
+        if (range < MIN_RANGE_FOR_RESCALE) return logicalTargets
+        return logicalTargets.map { p5 + it.coerceIn(0f, 1f) * range }
+    }
+
+    /**
+     * Percentyl z posortowanej listy (interpolacja liniowa między sąsiednimi indeksami).
+     *
+     * @param sorted lista posortowana rosnąco
+     * @param q kwantyl w [0..1]
+     */
+    internal fun percentile(sorted: List<Float>, q: Float): Float {
+        if (sorted.isEmpty()) return 0f
+        if (sorted.size == 1) return sorted[0]
+        val idx = q.coerceIn(0f, 1f) * (sorted.size - 1)
+        val lo = idx.toInt()
+        val hi = (lo + 1).coerceAtMost(sorted.lastIndex)
+        val frac = idx - lo
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * frac
     }
 
     /**

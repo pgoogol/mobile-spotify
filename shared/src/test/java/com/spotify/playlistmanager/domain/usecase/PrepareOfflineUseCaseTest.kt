@@ -95,11 +95,13 @@ class PrepareOfflineUseCaseTest {
         val trackPhases = useCase(templateId = null).toList()
             .filter { it.phase == PrepareOfflineUseCase.OfflineProgress.Phase.TRACKS }
 
-        assertEquals(2, trackPhases.size)
+        // templateId=null → 2 playlisty użytkownika + 1 dodatkowa faza "Polubione utwory"
+        assertEquals(3, trackPhases.size)
         assertEquals(1, trackPhases[0].current)
         assertEquals(2, trackPhases[0].total)
         assertEquals("Mix 1", trackPhases[0].currentPlaylistName)
         assertEquals(2, trackPhases[1].current)
+        assertEquals("Polubione utwory", trackPhases[2].currentPlaylistName)
     }
 
     @Test

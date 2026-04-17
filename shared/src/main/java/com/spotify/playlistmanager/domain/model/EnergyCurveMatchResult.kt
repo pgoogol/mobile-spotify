@@ -8,12 +8,14 @@ import com.spotify.playlistmanager.data.model.Track
 data class SegmentMatchResult(
     /** Dopasowane utwory w kolejności krzywej. */
     val tracks: List<MatchedTrack>,
-    /** Docelowe score'y krzywej. */
+    /** Docelowe score'y — już przeskalowane do rozkładu puli (ta sama skala co `compositeScore`). */
     val targetScores: List<Float>,
     /** Procent dopasowania: 1 − avg(|target − actual|). Zakres [0, 1]. */
     val matchPercentage: Float,
-    /** Score ostatniego utworu (do smooth join z następnym segmentem). */
+    /** Score ostatniego utworu (do smooth join z następnym segmentem tej samej osi). */
     val lastScore: Float,
+    /** Oś, na której policzono [lastScore] i `compositeScore` utworów (DANCE/MOOD). */
+    val scoreAxis: ScoreAxis = ScoreAxis.DANCE,
     /**
      * Numer rundy generowania, do której należy ten segment.
      * 0 = nieznana (backward compat dla starych testów / ścieżki bez krzywych).

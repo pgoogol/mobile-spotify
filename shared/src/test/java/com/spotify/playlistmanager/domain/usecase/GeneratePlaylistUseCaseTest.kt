@@ -226,7 +226,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 4,
-            energyCurve = EnergyCurve.SalsaRomantica
+            energyCurve = EnergyCurve.Rising
         )
         val result = useCase.generateWithCurves(listOf(source))
         assertEquals(4, result.generateResult.tracks.size)
@@ -240,11 +240,11 @@ class GeneratePlaylistUseCaseTest {
         val sources = listOf(
             PlaylistSource(
                 playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
-                trackCount = 3, energyCurve = EnergyCurve.SalsaRomantica
+                trackCount = 3, energyCurve = EnergyCurve.Rising
             ),
             PlaylistSource(
                 playlist = Playlist(playlistId, "P1", null, null, 5, "owner"),
-                trackCount = 2, energyCurve = EnergyCurve.SalsaRapida
+                trackCount = 2, energyCurve = EnergyCurve.Rising
             )
         )
         val result = useCase.generateWithCurves(sources, smoothJoin = true)
@@ -260,7 +260,7 @@ class GeneratePlaylistUseCaseTest {
         )
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
-            trackCount = 3, energyCurve = EnergyCurve.SalsaRomantica
+            trackCount = 3, energyCurve = EnergyCurve.Rising
         )
         val result = uc.generateWithCurves(listOf(source))
         assertEquals(3, result.generateResult.tracks.size)
@@ -404,7 +404,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 3,
-            energyCurve = EnergyCurve.SalsaRomantica,
+            energyCurve = EnergyCurve.Rising,
             pinnedTracks = listOf(
                 PinnedTrackInfo("t1", "Track A", "Artysta"),
                 PinnedTrackInfo("t4", "Track D", "Artysta")
@@ -422,7 +422,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 3,
-            energyCurve = EnergyCurve.SalsaRomantica,
+            energyCurve = EnergyCurve.Rising,
             pinnedTracks = listOf(
                 PinnedTrackInfo("t1", "Track A", "Artysta")
             )
@@ -458,7 +458,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 5,
-            energyCurve = EnergyCurve.SalsaClasica,
+            energyCurve = EnergyCurve.Arc,
             pinnedTracks = listOf(
                 PinnedTrackInfo("t1", "Track A", "Artysta"),
                 PinnedTrackInfo("t3", "Track C", "Artysta")
@@ -515,7 +515,7 @@ class GeneratePlaylistUseCaseTest {
         val source = PlaylistSource(
             playlist = Playlist(playlistId, "Test", null, null, 5, "owner"),
             trackCount = 4,
-            energyCurve = EnergyCurve.SalsaRomantica,
+            energyCurve = EnergyCurve.Rising,
             pinnedTracks = listOf(
                 PinnedTrackInfo(
                     id = "ext-2",
@@ -623,11 +623,15 @@ class GeneratePlaylistUseCaseTest {
         assertTrue("ext-4 znow w wynikach (pinned ignoruje exclude)",
             "ext-4" in secondResult.generateResult.tracks.map { it.id })
 
-        // Status wyczerpania pl-1 powinien pokazac 2 zuzyte z 5 (nie 3)
+        // Status wyczerpania pl-1 jest kumulatywny:
+        // runda 1 uzywa 2 tracki z pl-1, runda 2 uzywa kolejne 2 z pl-1 → lacznie 4/5.
+        // ext-4 jest EXTERNAL (z innej playlisty) — nie wlicza sie do licznika pl-1.
         val pl1Status = secondResult.exhaustionStatuses.find { it.playlistId == playlistId }
         assertNotNull("Status pl-1 powinien istniec", pl1Status)
         assertEquals(5, pl1Status!!.totalTracks)
-        assertEquals("Tylko 2 tracki z pl-1 sa zuzyte (ext-4 nie liczy sie)",
-            2, pl1Status.usedTracks)
+        assertEquals(
+            "4 tracki z pl-1 sa zuzyte kumulatywnie (2+2), ext-4 nie liczy sie",
+            4, pl1Status.usedTracks
+        )
     }
 }

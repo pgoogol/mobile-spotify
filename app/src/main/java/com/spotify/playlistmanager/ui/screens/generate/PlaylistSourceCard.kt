@@ -15,8 +15,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -31,7 +29,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,8 +55,9 @@ import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
 import com.spotify.playlistmanager.data.model.SortOption
-import com.spotify.playlistmanager.domain.model.CurveGroup
 import com.spotify.playlistmanager.domain.model.EnergyCurve
+import com.spotify.playlistmanager.domain.model.ScoreAxis
+import com.spotify.playlistmanager.domain.model.StableLevel
 import com.spotify.playlistmanager.domain.model.WaveDirection
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
@@ -71,9 +69,14 @@ import com.spotify.playlistmanager.ui.theme.SpotifyGreen
  * - Stepper liczby utworów (1–200)
  * - Dropdown krzywej energii + miniaturka Canvas 48dp
  * - AnimatedVisibility: konfiguracja Wave (kierunek + stepper N)
+ * - AnimatedVisibility: konfiguracja Stable (poziom LOW/MID/HIGH)
+ * - AnimatedVisibility: ostrzeżenie o braku smooth join (różna oś niż poprzedni segment)
  * - AnimatedVisibility: sortowanie (widoczne tylko gdy krzywa = None)
  * - Harmonic Mixing toggle (widoczny tylko gdy krzywa ≠ None)
  * - Pinned tracks z obsługą cross-playlist
+ *
+ * @param prevScoreAxis oś poprzedniego segmentu (null = brak poprzedniego lub smooth join wyłączony).
+ *   Gdy różni się od osi bieżącego segmentu, wyświetlany jest hint o braku smooth join.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,14 +88,12 @@ fun PlaylistSourceCard(
     canRemove: Boolean,
     onPinTracks: () -> Unit,
     onRemovePinnedTrack: (String) -> Unit,
+    prevScoreAxis: ScoreAxis? = null,
     modifier: Modifier = Modifier
 ) {
     var playlistExpanded by remember { mutableStateOf(false) }
     var curveExpanded by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
-    var expandedGroups by remember {
-        mutableStateOf(setOf(CurveGroup.SALSA, CurveGroup.BACHATA, CurveGroup.UNIVERSAL))
-    }
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -173,7 +174,7 @@ fun PlaylistSourceCard(
                         value = source.energyCurve.displayName,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Krzywa") },
+                        label = { Text("Strategia") },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = curveExpanded) },
                         modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         singleLine = true,
@@ -184,68 +185,14 @@ fun PlaylistSourceCard(
                         expanded = curveExpanded,
                         onDismissRequest = { curveExpanded = false }
                     ) {
-                        EnergyCurve.groupedPresets.entries.forEachIndexed { groupIdx, (group, curves) ->
-                            if (group == CurveGroup.NONE) {
-                                curves.forEach { preset ->
-                                    DropdownMenuItem(
-                                        text = { Text(preset.displayName) },
-                                        onClick = {
-                                            onUpdate(source.copy(energyCurve = preset))
-                                            curveExpanded = false
-                                        }
-                                    )
+                        EnergyCurve.presets.forEach { preset ->
+                            DropdownMenuItem(
+                                text = { Text(preset.displayName) },
+                                onClick = {
+                                    onUpdate(source.copy(energyCurve = preset))
+                                    curveExpanded = false
                                 }
-                            } else {
-                                if (groupIdx > 0) {
-                                    HorizontalDivider()
-                                }
-                                val isExpanded = group in expandedGroups
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            group.displayName,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Icon(
-                                            imageVector = if (isExpanded)
-                                                Icons.Default.ExpandLess
-                                            else
-                                                Icons.Default.ExpandMore,
-                                            contentDescription = if (isExpanded)
-                                                "Zwiń ${group.displayName}"
-                                            else
-                                                "Rozwiń ${group.displayName}"
-                                        )
-                                    },
-                                    onClick = {
-                                        expandedGroups = if (isExpanded) {
-                                            expandedGroups - group
-                                        } else {
-                                            expandedGroups + group
-                                        }
-                                    }
-                                )
-                                if (isExpanded) {
-                                    curves.forEach { preset ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    preset.displayName,
-                                                    modifier = Modifier.padding(start = 12.dp)
-                                                )
-                                            },
-                                            onClick = {
-                                                onUpdate(source.copy(energyCurve = preset))
-                                                curveExpanded = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
+                            )
                         }
                     }
                 }
@@ -259,6 +206,30 @@ fun PlaylistSourceCard(
                 }
             }
 
+            // ── Ostrzeżenie Arc/Valley (min 3 utwory) ──────────────────
+            val needsMinThree = source.energyCurve is EnergyCurve.Arc || source.energyCurve is EnergyCurve.Valley
+            AnimatedVisibility(visible = needsMinThree && source.trackCount < 3) {
+                Text(
+                    "⚠ ${source.energyCurve.displayName} wymaga min. 3 utworów — z 2 przejdzie na prostszą strategię",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            // ── Hint: brak smooth join (różna oś niż poprzedni segment) ─
+            val axisChanged = prevScoreAxis != null
+                    && source.energyCurve !is EnergyCurve.None
+                    && prevScoreAxis != source.energyCurve.scoreAxis
+            AnimatedVisibility(visible = axisChanged) {
+                val prevName = if (prevScoreAxis == ScoreAxis.DANCE) "tanecznej" else "nastroju"
+                val curName  = if (source.energyCurve.scoreAxis == ScoreAxis.DANCE) "tanecznej" else "nastroju"
+                Text(
+                    "ℹ Poprzedni segment używa osi $prevName, ten — $curName. Przejście będzie twarde (bez smooth join).",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+
             // ── Konfiguracja Wave ───────────────────────────────────────
             AnimatedVisibility(visible = source.energyCurve is EnergyCurve.Wave) {
                 val wave = source.energyCurve as? EnergyCurve.Wave ?: return@AnimatedVisibility
@@ -266,6 +237,15 @@ fun PlaylistSourceCard(
                     wave = wave,
                     trackCount = source.trackCount,
                     onWaveChange = { onUpdate(source.copy(energyCurve = it)) }
+                )
+            }
+
+            // ── Konfiguracja Stable (poziom energii) ───────────────────
+            AnimatedVisibility(visible = source.energyCurve is EnergyCurve.Stable) {
+                val stable = source.energyCurve as? EnergyCurve.Stable ?: return@AnimatedVisibility
+                StableConfiguration(
+                    stable = stable,
+                    onStableChange = { onUpdate(source.copy(energyCurve = it)) }
                 )
             }
 
@@ -490,10 +470,35 @@ private fun WaveConfiguration(
 
         if (trackCount < wave.tracksPerHalfWave) {
             Text(
-                "⚠ Zbyt mało utworów (min. ${wave.tracksPerHalfWave})",
+                "⚠ Zbyt mało utworów dla pełnej fali (min. ${wave.tracksPerHalfWave})",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error
             )
+        }
+    }
+}
+
+// ── Konfiguracja Stable (poziom energii) ────────────────────────────────
+
+@Composable
+private fun StableConfiguration(
+    stable: EnergyCurve.Stable,
+    onStableChange: (EnergyCurve.Stable) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Poziom energii:", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StableLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = stable.level == level,
+                    onClick = { onStableChange(stable.copy(level = level)) },
+                    label = { Text(level.label) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = SpotifyGreen,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                )
+            }
         }
     }
 }

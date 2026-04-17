@@ -111,47 +111,54 @@ class GeneratorTemplateRepository @Inject constructor(
 
     companion object {
         fun serializeCurve(curve: EnergyCurve): Pair<String, String?> = when (curve) {
-            is EnergyCurve.None           -> "none" to null
-            is EnergyCurve.SalsaRomantica -> "salsa_romantica" to null
-            is EnergyCurve.SalsaClasica   -> "salsa_clasica" to null
-            is EnergyCurve.SalsaRapida    -> "salsa_rapida" to null
-            is EnergyCurve.Timba          -> "timba" to null
-            is EnergyCurve.BachataRise    -> "bachata_rise" to null
-            is EnergyCurve.BachataArc     -> "bachata_arc" to null
-            is EnergyCurve.Crescendo      -> "crescendo" to null
-            is EnergyCurve.Peak           -> "peak" to null
-            is EnergyCurve.Wave           -> "wave" to JSONObject().apply {
+            is EnergyCurve.None      -> "none" to null
+            is EnergyCurve.Rising    -> "rising" to null
+            is EnergyCurve.Falling   -> "falling" to null
+            is EnergyCurve.Stable    -> "stable" to JSONObject().apply {
+                put("level", curve.level.name.lowercase())
+            }.toString()
+            is EnergyCurve.Arc       -> "arc" to null
+            is EnergyCurve.Valley    -> "valley" to null
+            is EnergyCurve.Romantic  -> "romantic" to null
+            is EnergyCurve.Calm      -> "calm" to null
+            is EnergyCurve.Wave      -> "wave" to JSONObject().apply {
                 put("direction", curve.direction.name.lowercase())
                 put("tracksPerHalfWave", curve.tracksPerHalfWave)
-                put("center", curve.center.toDouble())
             }.toString()
         }
 
         fun deserializeCurve(type: String, params: String?): EnergyCurve = when (type) {
-            "none" -> EnergyCurve.None
-            "salsa_romantica" -> EnergyCurve.SalsaRomantica
-            "salsa_clasica" -> EnergyCurve.SalsaClasica
-            "salsa_rapida" -> EnergyCurve.SalsaRapida
-            "timba" -> EnergyCurve.Timba
-            "bachata_rise" -> EnergyCurve.BachataRise
-            "bachata_arc" -> EnergyCurve.BachataArc
-            "crescendo" -> EnergyCurve.Crescendo
-            "peak" -> EnergyCurve.Peak
+            "none"     -> EnergyCurve.None
+            "rising"   -> EnergyCurve.Rising
+            "falling"  -> EnergyCurve.Falling
+            "stable"   -> {
+                if (params == null) EnergyCurve.Stable()
+                else runCatching {
+                    val obj = JSONObject(params)
+                    val lvl = obj.optString("level", "mid")
+                    EnergyCurve.Stable(
+                        level = StableLevel.valueOf(lvl.uppercase())
+                    )
+                }.getOrDefault(EnergyCurve.Stable())
+            }
+            "arc"      -> EnergyCurve.Arc
+            "valley"   -> EnergyCurve.Valley
+            "romantic" -> EnergyCurve.Romantic
+            "calm"     -> EnergyCurve.Calm
+            // Migracja starych wariantów
+            "salsa_romantica", "bachata_rise", "salsa_rapida", "crescendo" -> EnergyCurve.Rising
+            "salsa_clasica", "bachata_arc", "timba", "peak" -> EnergyCurve.Arc
             "wave" -> {
-                if (params == null) EnergyCurve.None
+                if (params == null) EnergyCurve.Wave()
                 else runCatching {
                     val obj = JSONObject(params)
                     val dir = obj.optString("direction", "rising")
                     val tphw = obj.optInt("tracksPerHalfWave", 3)
-                    // Wsteczna kompatybilność: stare zapisy nie mają "center" —
-                    // optDouble z defaultem daje 0.50f (obecne zachowanie)
-                    val center = obj.optDouble("center", EnergyCurve.Wave.CENTER_UNIVERSAL.toDouble()).toFloat()
                     EnergyCurve.Wave(
                         direction = WaveDirection.valueOf(dir.uppercase()),
-                        tracksPerHalfWave = tphw,
-                        center = center
+                        tracksPerHalfWave = tphw
                     )
-                }.getOrDefault(EnergyCurve.None)
+                }.getOrDefault(EnergyCurve.Wave())
             }
             else -> EnergyCurve.None
         }
