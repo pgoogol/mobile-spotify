@@ -100,6 +100,7 @@ import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.data.model.TrackAudioFeatures
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.ExhaustionStatus
+import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.model.MatchedTrack
 import com.spotify.playlistmanager.domain.model.TargetAction
 import com.spotify.playlistmanager.domain.usecase.FindReplacementsUseCase
@@ -321,7 +322,10 @@ fun GenerateScreen(
                     }
                 }
             } else {
-                itemsIndexed(state.sources, key = { _, s -> s.id }) { _, source ->
+                itemsIndexed(state.sources, key = { _, s -> s.id }) { index, source ->
+                    val prevAxis = if (index > 0 && state.smoothJoin)
+                        state.sources[index - 1].energyCurve.scoreAxis
+                    else null
                     PlaylistSourceCard(
                         source = source,
                         availablePlaylists = state.availablePlaylists,
@@ -332,6 +336,7 @@ fun GenerateScreen(
                         onRemovePinnedTrack = { trackId ->
                             viewModel.removePinnedTrack(source.id, trackId)
                         },
+                        prevScoreAxis = prevAxis,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
                 }

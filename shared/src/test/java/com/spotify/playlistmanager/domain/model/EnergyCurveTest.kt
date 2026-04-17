@@ -124,28 +124,34 @@ class EnergyCurveTest {
     // ══════════════════════════════════════════════════════════
 
     @Test
-    fun `Stable returns all 0_5 for N=10`() {
-        val targets = EnergyCurve.Stable.generateTargets(10)
+    fun `Stable MID returns all 0_5 for N=10`() {
+        val targets = EnergyCurve.Stable(StableLevel.MID).generateTargets(10)
         assertEquals(10, targets.size)
         targets.forEach { assertEquals(0.5f, it, 0.001f) }
     }
 
     @Test
-    fun `Stable returns all 0_5 for N=2`() {
-        val targets = EnergyCurve.Stable.generateTargets(2)
+    fun `Stable LOW returns all 0_25 for N=2`() {
+        val targets = EnergyCurve.Stable(StableLevel.LOW).generateTargets(2)
         assertEquals(2, targets.size)
-        targets.forEach { assertEquals(0.5f, it, 0.001f) }
+        targets.forEach { assertEquals(0.25f, it, 0.001f) }
     }
 
     @Test
-    fun `Stable returns all 0_5 for N=3`() {
-        val targets = EnergyCurve.Stable.generateTargets(3)
-        targets.forEach { assertEquals(0.5f, it, 0.001f) }
+    fun `Stable HIGH returns all 0_75 for N=3`() {
+        val targets = EnergyCurve.Stable(StableLevel.HIGH).generateTargets(3)
+        targets.forEach { assertEquals(0.75f, it, 0.001f) }
+    }
+
+    @Test
+    fun `Stable default level is MID`() {
+        val stable = EnergyCurve.Stable()
+        assertEquals(StableLevel.MID, stable.level)
     }
 
     @Test
     fun `Stable uses DANCE axis`() {
-        assertEquals(ScoreAxis.DANCE, EnergyCurve.Stable.scoreAxis)
+        assertEquals(ScoreAxis.DANCE, EnergyCurve.Stable().scoreAxis)
     }
 
     // ══════════════════════════════════════════════════════════

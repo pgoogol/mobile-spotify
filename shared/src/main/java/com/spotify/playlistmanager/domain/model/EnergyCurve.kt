@@ -105,18 +105,18 @@ sealed class EnergyCurve {
     }
 
     // ════════════════════════════════════════════════════════
-    //  Stable ━ — wszystkie utwory w okolicy mediany puli
+    //  Stable ━ — wszystkie utwory w okolicy wybranego poziomu
     // ════════════════════════════════════════════════════════
 
     @Serializable
     @SerialName("stable")
-    data object Stable : EnergyCurve() {
-        override val displayName = "━ Stabilnie"
+    data class Stable(val level: StableLevel = StableLevel.MID) : EnergyCurve() {
+        override val displayName get() = "━ Stabilnie · ${level.label}"
         override val description = "Wszystkie utwory o podobnym tempie — tanda, blok jednolity"
 
         override fun generateTargets(trackCount: Int): List<Float> {
             if (trackCount <= 0) return emptyList()
-            return List(trackCount) { 0.5f }
+            return List(trackCount) { level.target }
         }
     }
 
@@ -274,7 +274,7 @@ sealed class EnergyCurve {
             None,
             Rising,
             Falling,
-            Stable,
+            Stable(),
             Arc,
             Valley,
             Wave(direction = WaveDirection.RISING),
@@ -292,4 +292,25 @@ enum class WaveDirection(val label: String, val arrow: String) {
 
     @SerialName("falling")
     FALLING("opadająca", "↘")
+}
+
+/**
+ * Poziom energii dla strategii [EnergyCurve.Stable].
+ *
+ * Definiuje logical target score [0..1], który po auto-range (p5-p95 puli)
+ * mapuje na:
+ * - [LOW]  = dolny kwartyl puli (spokojny blok)
+ * - [MID]  = mediana puli (neutralny)
+ * - [HIGH] = górny kwartyl puli (mocny blok)
+ */
+@Serializable
+enum class StableLevel(val target: Float, val label: String) {
+    @SerialName("low")
+    LOW(0.25f, "Niski"),
+
+    @SerialName("mid")
+    MID(0.50f, "Środkowy"),
+
+    @SerialName("high")
+    HIGH(0.75f, "Wysoki")
 }

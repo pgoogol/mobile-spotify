@@ -312,7 +312,7 @@ class EnergyCurveCalculatorTest {
     @Test
     fun `stable strategy picks tracks near median score`() {
         val result = EnergyCurveCalculator.matchTracks(
-            testPool, testFeaturesMap, EnergyCurve.Stable, emptyList(), 5
+            testPool, testFeaturesMap, EnergyCurve.Stable(), emptyList(), 5
         )
         val allScores = testFeaturesMap.values.map { CompositeScoreCalculator.calculate(it) }.sorted()
         val median = EnergyCurveCalculator.percentile(allScores, 0.5f)

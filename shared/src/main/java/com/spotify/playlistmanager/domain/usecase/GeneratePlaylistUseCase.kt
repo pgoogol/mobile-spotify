@@ -121,7 +121,8 @@ class GeneratePlaylistUseCase @Inject constructor(
                     val score = featuresMap[track.id]
                         ?.let { CompositeScoreCalculator.calculate(it) }
                         ?: CompositeScoreCalculator.DEFAULT_SCORE
-                    MatchedTrack(track, score, 0f)
+                    // targetScore = actualScore: brak krzywej → utwór "celuje" w swój własny score
+                    MatchedTrack(track, score, score)
                 }
                 allSegments.add(
                     SegmentMatchResult(
@@ -166,8 +167,10 @@ class GeneratePlaylistUseCase @Inject constructor(
                 prevAxis = finalSegment.scoreAxis
             }
 
+            // Kumulatywna liczba użytych: wszystkie tracki tej playlisty
+            // które są w runningExclude (= poprzednie rundy + właśnie wzięte)
             val sourceTrackIds = sourceTracks.mapNotNull { it.id }.toSet()
-            val usedFromSource = takenIds.count { it in sourceTrackIds }
+            val usedFromSource = sourceTrackIds.count { it in runningExclude }
             exhaustionStatuses.add(
                 ExhaustionStatus(
                     playlistId = playlistId,

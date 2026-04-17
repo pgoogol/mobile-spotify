@@ -56,6 +56,8 @@ import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
 import com.spotify.playlistmanager.data.model.SortOption
 import com.spotify.playlistmanager.domain.model.EnergyCurve
+import com.spotify.playlistmanager.domain.model.ScoreAxis
+import com.spotify.playlistmanager.domain.model.StableLevel
 import com.spotify.playlistmanager.domain.model.WaveDirection
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
@@ -67,9 +69,14 @@ import com.spotify.playlistmanager.ui.theme.SpotifyGreen
  * - Stepper liczby utworów (1–200)
  * - Dropdown krzywej energii + miniaturka Canvas 48dp
  * - AnimatedVisibility: konfiguracja Wave (kierunek + stepper N)
+ * - AnimatedVisibility: konfiguracja Stable (poziom LOW/MID/HIGH)
+ * - AnimatedVisibility: ostrzeżenie o braku smooth join (różna oś niż poprzedni segment)
  * - AnimatedVisibility: sortowanie (widoczne tylko gdy krzywa = None)
  * - Harmonic Mixing toggle (widoczny tylko gdy krzywa ≠ None)
  * - Pinned tracks z obsługą cross-playlist
+ *
+ * @param prevScoreAxis oś poprzedniego segmentu (null = brak poprzedniego lub smooth join wyłączony).
+ *   Gdy różni się od osi bieżącego segmentu, wyświetlany jest hint o braku smooth join.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -81,6 +88,7 @@ fun PlaylistSourceCard(
     canRemove: Boolean,
     onPinTracks: () -> Unit,
     onRemovePinnedTrack: (String) -> Unit,
+    prevScoreAxis: ScoreAxis? = null,
     modifier: Modifier = Modifier
 ) {
     var playlistExpanded by remember { mutableStateOf(false) }
@@ -208,6 +216,20 @@ fun PlaylistSourceCard(
                 )
             }
 
+            // ── Hint: brak smooth join (różna oś niż poprzedni segment) ─
+            val axisChanged = prevScoreAxis != null
+                && source.energyCurve !is EnergyCurve.None
+                && prevScoreAxis != source.energyCurve.scoreAxis
+            AnimatedVisibility(visible = axisChanged) {
+                val prevName = if (prevScoreAxis == ScoreAxis.DANCE) "tanecznej" else "nastroju"
+                val curName  = if (source.energyCurve.scoreAxis == ScoreAxis.DANCE) "tanecznej" else "nastroju"
+                Text(
+                    "ℹ Poprzedni segment używa osi $prevName, ten — $curName. Przejście będzie twarde (bez smooth join).",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+
             // ── Konfiguracja Wave ───────────────────────────────────────
             AnimatedVisibility(visible = source.energyCurve is EnergyCurve.Wave) {
                 val wave = source.energyCurve as? EnergyCurve.Wave ?: return@AnimatedVisibility
@@ -215,6 +237,15 @@ fun PlaylistSourceCard(
                     wave = wave,
                     trackCount = source.trackCount,
                     onWaveChange = { onUpdate(source.copy(energyCurve = it)) }
+                )
+            }
+
+            // ── Konfiguracja Stable (poziom energii) ───────────────────
+            AnimatedVisibility(visible = source.energyCurve is EnergyCurve.Stable) {
+                val stable = source.energyCurve as? EnergyCurve.Stable ?: return@AnimatedVisibility
+                StableConfiguration(
+                    stable = stable,
+                    onStableChange = { onUpdate(source.copy(energyCurve = it)) }
                 )
             }
 
@@ -443,6 +474,31 @@ private fun WaveConfiguration(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error
             )
+        }
+    }
+}
+
+// ── Konfiguracja Stable (poziom energii) ────────────────────────────────
+
+@Composable
+private fun StableConfiguration(
+    stable: EnergyCurve.Stable,
+    onStableChange: (EnergyCurve.Stable) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Poziom energii:", style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StableLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = stable.level == level,
+                    onClick = { onStableChange(stable.copy(level = level)) },
+                    label = { Text(level.label) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = SpotifyGreen,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                )
+            }
         }
     }
 }

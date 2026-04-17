@@ -114,7 +114,9 @@ class GeneratorTemplateRepository @Inject constructor(
             is EnergyCurve.None      -> "none" to null
             is EnergyCurve.Rising    -> "rising" to null
             is EnergyCurve.Falling   -> "falling" to null
-            is EnergyCurve.Stable    -> "stable" to null
+            is EnergyCurve.Stable    -> "stable" to JSONObject().apply {
+                put("level", curve.level.name.lowercase())
+            }.toString()
             is EnergyCurve.Arc       -> "arc" to null
             is EnergyCurve.Valley    -> "valley" to null
             is EnergyCurve.Romantic  -> "romantic" to null
@@ -129,7 +131,16 @@ class GeneratorTemplateRepository @Inject constructor(
             "none"     -> EnergyCurve.None
             "rising"   -> EnergyCurve.Rising
             "falling"  -> EnergyCurve.Falling
-            "stable"   -> EnergyCurve.Stable
+            "stable"   -> {
+                if (params == null) EnergyCurve.Stable()
+                else runCatching {
+                    val obj = JSONObject(params)
+                    val lvl = obj.optString("level", "mid")
+                    EnergyCurve.Stable(
+                        level = StableLevel.valueOf(lvl.uppercase())
+                    )
+                }.getOrDefault(EnergyCurve.Stable())
+            }
             "arc"      -> EnergyCurve.Arc
             "valley"   -> EnergyCurve.Valley
             "romantic" -> EnergyCurve.Romantic

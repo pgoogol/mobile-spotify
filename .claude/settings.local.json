@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :shared:test --tests \"com.spotify.playlistmanager.domain.model.*\")",
+      "Bash(./gradlew :shared:test)",
+      "Bash(./gradlew :app:assembleDebug)",
+      "Bash(gh auth:*)",
+      "Bash(where gh:*)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/pgogo/AppData/Local/Programs//**)",
+      "Bash(ssh -T git@github.com)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(./gradlew :shared:test --tests \"*.GeneratePlaylistUseCaseTest.external pinned nie wplywa na exhaustion playlisty zrodla\")",
+      "Bash(./gradlew :shared:testReleaseUnitTest --tests \"*.GeneratePlaylistUseCaseTest\" --info)",
+      "Bash(./gradlew :shared:testReleaseUnitTest --tests \"*.PrepareOfflineUseCaseTest.progress reports correct track counts\" --info)"
+    ]
+  }
+}
