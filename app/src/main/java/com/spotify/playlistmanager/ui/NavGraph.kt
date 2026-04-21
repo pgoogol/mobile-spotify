@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Queue
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,6 +28,7 @@ import com.spotify.playlistmanager.ui.screens.login.LoginScreen
 import com.spotify.playlistmanager.ui.screens.playlists.PlaylistsScreen
 import com.spotify.playlistmanager.ui.screens.profile.ProfileScreen
 import com.spotify.playlistmanager.ui.screens.settings.SettingsScreen
+import com.spotify.playlistmanager.ui.screens.stepwise.StepwiseScreen
 import com.spotify.playlistmanager.ui.screens.templates.TemplatesScreen
 import com.spotify.playlistmanager.ui.screens.tracks.TracksScreen
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
@@ -47,6 +49,7 @@ sealed class Screen(val route: String) {
     }
 
     data object Generate : Screen("generate")
+    data object Stepwise : Screen("stepwise")
     data object Templates : Screen("templates")
     data object Settings : Screen("settings")
     data object Profile : Screen("profile")
@@ -64,12 +67,14 @@ private data class BottomNavItem(
 private val bottomNavItems = listOf(
     BottomNavItem(Screen.Playlists, "Playlisty", Icons.Default.LibraryMusic),
     BottomNavItem(Screen.Generate, "Generuj", Icons.Default.AutoAwesome),
+    BottomNavItem(Screen.Stepwise, "Krok", Icons.Default.Queue),
     BottomNavItem(Screen.Profile, "Profil", Icons.Default.Person)
 )
 
 private val bottomBarRoutes = setOf(
     Screen.Playlists.route,
     Screen.Generate.route,
+    Screen.Stepwise.route,
     Screen.Profile.route
 )
 
@@ -222,6 +227,10 @@ fun AppNavGraph(
                     }
                 }
             )
+        }
+
+        composable(Screen.Stepwise.route) {
+            StepwiseScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Profile.route) {
