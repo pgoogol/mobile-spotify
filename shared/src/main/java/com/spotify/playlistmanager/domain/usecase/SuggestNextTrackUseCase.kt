@@ -57,6 +57,20 @@ class SuggestNextTrackUseCase @Inject constructor(
     )
 
     /**
+     * Wagi kosztu do obliczeń — pozwala userowi dostroić algorytm.
+     * Domyślne wartości odtwarzają stałe [W_FIT], [W_HARMONIC], [W_BPM_JUMP].
+     */
+    data class Weights(
+        val wFit: Float = W_FIT,
+        val wHarmonic: Float = W_HARMONIC,
+        val wBpmJump: Float = W_BPM_JUMP
+    ) {
+        companion object {
+            val DEFAULT = Weights()
+        }
+    }
+
+    /**
      * @param pool pełna pula utworów (np. playlista salsa)
      * @param alreadyPickedIds utwory już użyte w tej sesji — twardo wykluczane
      * @param lastPickedTrack ostatni wybrany utwór — kontekst dla harmonii/BPM
@@ -64,6 +78,7 @@ class SuggestNextTrackUseCase @Inject constructor(
      * @param currentAxis oś, na której był wybierany ostatni utwór (dla [NextTrackTarget.Hold],
      *        [NextTrackTarget.Warmup], [NextTrackTarget.Chill] i [NextTrackTarget.SwitchAxis])
      * @param k ile kandydatów zwrócić (default 5)
+     * @param weights wagi kosztu (default = [Weights.DEFAULT])
      */
     suspend fun suggest(
         pool: List<Track>,
@@ -71,7 +86,8 @@ class SuggestNextTrackUseCase @Inject constructor(
         lastPickedTrack: Track?,
         target: NextTrackTarget,
         currentAxis: ScoreAxis = ScoreAxis.DANCE,
-        k: Int = DEFAULT_K
+        k: Int = DEFAULT_K,
+        weights: Weights = Weights.DEFAULT
     ): Suggestion {
         // Hard exclude — dedup
         val candidatesPool = pool.filter { it.id != null && it.id !in alreadyPickedIds }
@@ -129,9 +145,9 @@ class SuggestNextTrackUseCase @Inject constructor(
                 0f
             }
 
-            val totalCost = W_FIT * fitDist +
-                    W_HARMONIC * (1f - harmonicCompat) +
-                    W_BPM_JUMP * bpmJumpNorm
+            val totalCost = weights.wFit * fitDist +
+                    weights.wHarmonic * (1f - harmonicCompat) +
+                    weights.wBpmJump * bpmJumpNorm
 
             Candidate(
                 track = track,
