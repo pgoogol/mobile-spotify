@@ -851,34 +851,42 @@ class StepwiseViewModel @Inject constructor(
     }
 
     /**
-     * Buduje finalny opis playlisty. Gwarantuje obecność linii
-     * "Wygenerowane: YYYY-MM-DD" na górze — nawet gdy user nadpisał opis.
+     * Buduje finalny opis playlisty. Gwarantuje obecność członu
+     * "Wygenerowane: YYYY-MM-DD" — nawet gdy user nadpisał opis.
+     *
+     * UWAGA: Spotify API zwraca 400 Bad Request gdy opis zawiera znaki
+     * nowej linii (`\n`, `\r`). Dlatego łączymy wszystkie fragmenty
+     * separatorem ` · ` i strippujemy newlines z opisu usera.
+     *
+     * Dodatkowo: Spotify limituje opis do 300 znaków — tniemy na zapas.
      */
     private fun buildFinalDescription(state: StepwiseUiState): String {
-        val today = java.time.LocalDate.now().toString() // ISO 2026-04-20
-        val userDesc = state.newPlaylistDescription.trim()
-        val dateLine = "Wygenerowane: $today"
+        val today = java.time.LocalDate.now().toString() // ISO 2026-04-21
+        val userDesc = state.newPlaylistDescription
+            .trim()
+            .replace(Regex("[\\r\\n]+"), " ")
+        val dateFragment = "Wygenerowane: $today"
+        val hasDateMarker = userDesc.contains("Wygenerowane:")
 
-        val hasDateLine = userDesc.lines()
-            .any { it.trim().startsWith("Wygenerowane:") }
-
-        return if (userDesc.isEmpty()) {
-            // Pełny szablon auto
-            val structureLine = state.tandaStructure?.let {
-                "Struktura tandy: ${it.countA}×A / ${it.countB}×B"
+        val full = if (userDesc.isEmpty()) {
+            val parts = mutableListOf(dateFragment)
+            state.tandaStructure?.let {
+                parts += "Struktura: ${it.countA}×A / ${it.countB}×B"
             }
-            val trackCountLine = "Utwory: ${state.sessionTracks.size}"
-            listOfNotNull(
-                dateLine,
-                structureLine,
-                trackCountLine,
-                "Tryb: Krok po kroku"
-            ).joinToString("\n")
-        } else if (!hasDateLine) {
-            "$dateLine\n\n$userDesc"
+            parts += "Utwory: ${state.sessionTracks.size}"
+            parts += "Tryb: Krok po kroku"
+            parts.joinToString(" · ")
+        } else if (!hasDateMarker) {
+            "$dateFragment · $userDesc"
         } else {
             userDesc
         }
+
+        return full.take(SPOTIFY_DESCRIPTION_LIMIT)
+    }
+
+    private companion object {
+        const val SPOTIFY_DESCRIPTION_LIMIT = 300
     }
 
     fun onSaveStateConsumed() {
