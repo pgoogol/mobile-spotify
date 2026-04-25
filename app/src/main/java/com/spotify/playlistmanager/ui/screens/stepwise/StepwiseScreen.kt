@@ -218,7 +218,8 @@ fun StepwiseScreen(
             SessionTracksSection(
                 tracks = state.sessionTracks,
                 onUndoLast = viewModel::onUndoLast,
-                onClear = viewModel::onClearSession
+                onClear = viewModel::onClearSession,
+                onAddFromAnyPlaylist = viewModel::onOpenManualTrackPicker
             )
 
             state.autoFillSnapshot?.let { snapshot ->
@@ -293,6 +294,26 @@ fun StepwiseScreen(
                     showSaveDialog = false
                 },
                 onDismiss = { showSaveDialog = false }
+            )
+        }
+    }
+
+    // Manual track picker (z dowolnej playlisty — duplikaty dozwolone)
+    state.manualTrackPicker?.let { picker ->
+        if (picker.playlist == null) {
+            ManualPickPlaylistDialog(
+                playlists = state.availablePlaylists,
+                onSelect = viewModel::onSelectManualPickerPlaylist,
+                onDismiss = viewModel::onCloseManualTrackPicker
+            )
+        } else {
+            ManualPickTrackDialog(
+                playlistName = picker.playlist.name,
+                tracks = picker.tracks,
+                isLoading = picker.isLoading,
+                onPick = viewModel::onPickTrackFromAnyPlaylist,
+                onBack = viewModel::onOpenManualTrackPicker,
+                onDismiss = viewModel::onCloseManualTrackPicker
             )
         }
     }
@@ -472,6 +493,153 @@ private fun AppendTargetPickerDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Anuluj") }
+        }
+    )
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Dialogi: ręczny pick z dowolnej playlisty (duplikaty dozwolone)
+// ══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ManualPickPlaylistDialog(
+    playlists: List<Playlist>,
+    onSelect: (Playlist) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Wybierz playlistę") },
+        text = {
+            if (playlists.isEmpty()) {
+                Text(
+                    "Brak playlist.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    items(playlists) { playlist ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(playlist) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    playlist.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    "${playlist.trackCount} utworów",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Anuluj") }
+        }
+    )
+}
+
+@Composable
+private fun ManualPickTrackDialog(
+    playlistName: String,
+    tracks: List<Track>,
+    isLoading: Boolean,
+    onPick: (Track) -> Unit,
+    onBack: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(tracks, query) {
+        if (query.isBlank()) tracks
+        else tracks.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                    it.artist.contains(query, ignoreCase = true)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                playlistName,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isLoading) {
+                    LoadingRow("Ładowanie utworów…")
+                } else {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Szukaj") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (filtered.isEmpty()) {
+                        Text(
+                            if (query.isBlank()) "Playlista jest pusta."
+                            else "Brak wyników dla \"$query\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 320.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(filtered) { track ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onPick(track) }
+                                        .padding(vertical = 6.dp, horizontal = 4.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            track.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            track.artist,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Zamknij") }
+        },
+        dismissButton = {
+            TextButton(onClick = onBack) { Text("Zmień playlistę") }
         }
     )
 }
@@ -811,7 +979,8 @@ private fun TandaProgressRow(
 private fun SessionTracksSection(
     tracks: List<SessionTrack>,
     onUndoLast: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onAddFromAnyPlaylist: () -> Unit
 ) {
     val anchorCount = tracks.count { it.isAnchor }
     val newCount = tracks.size - anchorCount
@@ -827,6 +996,16 @@ private fun SessionTracksSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onAddFromAnyPlaylist) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Dodaj utwór z playlisty")
+            }
         } else {
             val listState = rememberLazyListState()
             LaunchedEffect(tracks.size) {
@@ -865,6 +1044,15 @@ private fun SessionTracksSection(
                     )
                     Spacer(Modifier.width(4.dp))
                     Text("Wyczyść sesję")
+                }
+                TextButton(onClick = onAddFromAnyPlaylist) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Z playlisty")
                 }
             }
         }

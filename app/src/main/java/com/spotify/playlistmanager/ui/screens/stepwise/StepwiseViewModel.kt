@@ -87,6 +87,17 @@ data class AppendMode(
 )
 
 /**
+ * Stan dialogu „dodaj utwór z dowolnej playlisty".
+ * null = zamknięty. Gdy [playlist] non-null — wczytane utwory tej playlisty
+ * (bypass dedup, duplikaty dozwolone).
+ */
+data class ManualTrackPicker(
+    val playlist: Playlist? = null,
+    val tracks: List<Track> = emptyList(),
+    val isLoading: Boolean = false
+)
+
+/**
  * Snapshot stanu przed auto-fill — używany do undo całej grupy.
  * Gdy non-null, UI pokazuje modal potwierdzenia auto-fill.
  */
@@ -153,6 +164,9 @@ data class StepwiseUiState(
     /** null = tryb „nowa playlista"; non-null = dopisujemy do istniejącej. */
     val appendMode: AppendMode? = null,
     val isLoadingAppendAnchors: Boolean = false,
+
+    // ── Ręczny pick z dowolnej playlisty (duplikaty dozwolone) ─
+    val manualTrackPicker: ManualTrackPicker? = null,
 
     // ── Błędy ───────────────────────────────────────────────
     val error: String? = null
@@ -736,6 +750,87 @@ class StepwiseViewModel @Inject constructor(
             )
         }
         recomputeCandidates()
+    }
+
+    // ── Manual pick z dowolnej playlisty (duplikaty dozwolone) ─────────
+
+    fun onOpenManualTrackPicker() {
+        _state.update { it.copy(manualTrackPicker = ManualTrackPicker()) }
+    }
+
+    fun onCloseManualTrackPicker() {
+        _state.update { it.copy(manualTrackPicker = null) }
+    }
+
+    fun onSelectManualPickerPlaylist(playlist: Playlist) {
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    manualTrackPicker = ManualTrackPicker(
+                        playlist = playlist,
+                        isLoading = true
+                    )
+                )
+            }
+            val tracks = runCatching {
+                if (playlist.id == GeneratePlaylistUseCase.LIKED_SONGS_ID) {
+                    spotifyRepository.getLikedTracks()
+                } else {
+                    spotifyRepository.getPlaylistTracks(playlist.id)
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        manualTrackPicker = null,
+                        error = "Nie udało się pobrać utworów: ${e.message}"
+                    )
+                }
+            }.getOrNull() ?: return@launch
+
+            _state.update {
+                it.copy(
+                    manualTrackPicker = ManualTrackPicker(
+                        playlist = playlist,
+                        tracks = tracks,
+                        isLoading = false
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * Dodaje utwór z dowolnej playlisty do sesji — bez sprawdzania dedup,
+     * więc duplikat jest dozwolony. Pobiera features (BPM/Camelot) jeśli
+     * dostępne, by badge w sesji wyglądał spójnie z resztą.
+     */
+    fun onPickTrackFromAnyPlaylist(track: Track) {
+        viewModelScope.launch {
+            val features = track.id?.let { id ->
+                lastKnownFeaturesMap[id] ?: runCatching {
+                    featuresRepository.getFeaturesMap(listOf(id))
+                }.getOrNull()?.get(id)
+            }
+            _state.update { current ->
+                val score = features?.let {
+                    com.spotify.playlistmanager.domain.model.CompositeScoreCalculator
+                        .calculate(it, current.currentAxis)
+                } ?: 0f
+                current.copy(
+                    sessionTracks = current.sessionTracks + SessionTrack(
+                        track = track,
+                        pool = current.activePool,
+                        score = score,
+                        targetScore = score,
+                        axis = current.currentAxis,
+                        targetLabel = "Z innej playlisty",
+                        bpm = features?.bpm,
+                        camelot = features?.camelot
+                    ),
+                    manualTrackPicker = null
+                )
+            }
+        }
     }
 
     // ── Obliczanie kandydatów ───────────────────────────────────────────
