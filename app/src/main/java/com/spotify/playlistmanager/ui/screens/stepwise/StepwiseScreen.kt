@@ -53,6 +53,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -61,6 +62,7 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
@@ -96,6 +98,7 @@ import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.domain.model.NextTrackTarget
 import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.usecase.SuggestNextTrackUseCase
+import com.spotify.playlistmanager.ui.components.TrackDetailBottomSheet
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
 /**
@@ -219,7 +222,8 @@ fun StepwiseScreen(
                 tracks = state.sessionTracks,
                 onUndoLast = viewModel::onUndoLast,
                 onClear = viewModel::onClearSession,
-                onAddFromAnyPlaylist = viewModel::onOpenManualTrackPicker
+                onAddFromAnyPlaylist = viewModel::onOpenManualTrackPicker,
+                onShowDetail = viewModel::onShowTrackDetail
             )
 
             state.autoFillSnapshot?.let { snapshot ->
@@ -255,7 +259,8 @@ fun StepwiseScreen(
                 remainingInBlock = state.remainingInBlock,
                 isAutoFilling = state.isAutoFilling,
                 onPick = viewModel::onPickCandidate,
-                onAutoFill = viewModel::onAutoFillBlock
+                onAutoFill = viewModel::onAutoFillBlock,
+                onShowDetail = viewModel::onShowTrackDetail
             )
 
             AdvancedWeightsSection(
@@ -296,6 +301,17 @@ fun StepwiseScreen(
                 onDismiss = { showSaveDialog = false }
             )
         }
+    }
+
+    // Bottom sheet z podglądem informacji o utworze
+    state.trackDetailSheet?.let { sheet ->
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        TrackDetailBottomSheet(
+            track = sheet.track,
+            features = sheet.features,
+            sheetState = sheetState,
+            onDismiss = viewModel::onCloseTrackDetail
+        )
     }
 
     // Manual track picker (z dowolnej playlisty — duplikaty dozwolone)
@@ -980,7 +996,8 @@ private fun SessionTracksSection(
     tracks: List<SessionTrack>,
     onUndoLast: () -> Unit,
     onClear: () -> Unit,
-    onAddFromAnyPlaylist: () -> Unit
+    onAddFromAnyPlaylist: () -> Unit,
+    onShowDetail: (Track) -> Unit
 ) {
     val anchorCount = tracks.count { it.isAnchor }
     val newCount = tracks.size - anchorCount
@@ -1022,7 +1039,11 @@ private fun SessionTracksSection(
                     // Numeracja tylko dla nowych utworów (kotwice mają 📌)
                     val newNumber = if (sessionTrack.isAnchor) 0
                     else tracks.take(index + 1).count { !it.isAnchor }
-                    SessionTrackRow(newNumber, sessionTrack)
+                    SessionTrackRow(
+                        number = newNumber,
+                        sessionTrack = sessionTrack,
+                        onClick = { onShowDetail(sessionTrack.track) }
+                    )
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -1060,7 +1081,11 @@ private fun SessionTracksSection(
 }
 
 @Composable
-private fun SessionTrackRow(number: Int, sessionTrack: SessionTrack) {
+private fun SessionTrackRow(
+    number: Int,
+    sessionTrack: SessionTrack,
+    onClick: () -> Unit
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1073,6 +1098,7 @@ private fun SessionTrackRow(number: Int, sessionTrack: SessionTrack) {
                     )
                 else Modifier
             )
+            .clickable(onClick = onClick)
             .padding(vertical = if (sessionTrack.isAnchor) 2.dp else 0.dp)
     ) {
         if (sessionTrack.isAnchor) {
@@ -1355,7 +1381,8 @@ private fun CandidatesSection(
     remainingInBlock: Int,
     isAutoFilling: Boolean,
     onPick: (SuggestNextTrackUseCase.Candidate) -> Unit,
-    onAutoFill: () -> Unit
+    onAutoFill: () -> Unit,
+    onShowDetail: (Track) -> Unit
 ) {
     SectionCard(title = "Sugestie") {
         when {
@@ -1372,7 +1399,12 @@ private fun CandidatesSection(
             )
             else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 candidates.forEachIndexed { idx, candidate ->
-                    CandidateRow(idx + 1, candidate, onClick = { onPick(candidate) })
+                    CandidateRow(
+                        rank = idx + 1,
+                        candidate = candidate,
+                        onClick = { onPick(candidate) },
+                        onShowDetail = { onShowDetail(candidate.track) }
+                    )
                 }
             }
         }
@@ -1413,7 +1445,8 @@ private fun CandidatesSection(
 private fun CandidateRow(
     rank: Int,
     candidate: SuggestNextTrackUseCase.Candidate,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onShowDetail: () -> Unit
 ) {
     val compatChip = when {
         candidate.harmonicCompat >= 0.85f -> "\u2705"
@@ -1486,6 +1519,17 @@ private fun CandidateRow(
                         Spacer(Modifier.width(6.dp))
                         Text(compatChip, fontSize = 12.sp)
                     }
+                }
+                IconButton(
+                    onClick = onShowDetail,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = "Szczegóły utworu",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
                 IconButton(
                     onClick = { expanded = !expanded },

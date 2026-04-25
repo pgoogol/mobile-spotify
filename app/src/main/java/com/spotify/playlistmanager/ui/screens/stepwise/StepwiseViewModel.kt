@@ -98,6 +98,15 @@ data class ManualTrackPicker(
 )
 
 /**
+ * Stan podglądu informacji o utworze (bottom sheet).
+ * Features ładowane asynchronicznie po otwarciu — nullable dopóki nie przyjdą.
+ */
+data class TrackDetailSheet(
+    val track: Track,
+    val features: TrackAudioFeatures? = null
+)
+
+/**
  * Snapshot stanu przed auto-fill — używany do undo całej grupy.
  * Gdy non-null, UI pokazuje modal potwierdzenia auto-fill.
  */
@@ -167,6 +176,9 @@ data class StepwiseUiState(
 
     // ── Ręczny pick z dowolnej playlisty (duplikaty dozwolone) ─
     val manualTrackPicker: ManualTrackPicker? = null,
+
+    // ── Podgląd informacji o utworze (bottom sheet) ────────
+    val trackDetailSheet: TrackDetailSheet? = null,
 
     // ── Błędy ───────────────────────────────────────────────
     val error: String? = null
@@ -797,6 +809,32 @@ class StepwiseViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    // ── Podgląd informacji o utworze (bottom sheet) ────────────────────
+
+    fun onShowTrackDetail(track: Track) {
+        // Pokaż natychmiast z cache, jeśli mamy; doładuj features w tle.
+        val trackId = track.id
+        val cached = trackId?.let { lastKnownFeaturesMap[it] }
+        _state.update {
+            it.copy(trackDetailSheet = TrackDetailSheet(track = track, features = cached))
+        }
+        if (cached != null || trackId == null) return
+        viewModelScope.launch {
+            val fetched = runCatching {
+                featuresRepository.getFeaturesMap(listOf(trackId))
+            }.getOrNull()?.get(trackId)
+            _state.update { current ->
+                val sheet = current.trackDetailSheet ?: return@update current
+                if (sheet.track.id != trackId) return@update current
+                current.copy(trackDetailSheet = sheet.copy(features = fetched))
+            }
+        }
+    }
+
+    fun onCloseTrackDetail() {
+        _state.update { it.copy(trackDetailSheet = null) }
     }
 
     /**
