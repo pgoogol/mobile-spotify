@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Celebration
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Queue
@@ -25,6 +26,7 @@ import com.spotify.playlistmanager.ui.screens.csv.CsvImportScreen
 import com.spotify.playlistmanager.ui.screens.generate.GenerateScreen
 import com.spotify.playlistmanager.ui.screens.generate.GenerateViewModel
 import com.spotify.playlistmanager.ui.screens.login.LoginScreen
+import com.spotify.playlistmanager.ui.screens.party.PartyScreen
 import com.spotify.playlistmanager.ui.screens.playlists.PlaylistsScreen
 import com.spotify.playlistmanager.ui.screens.profile.ProfileScreen
 import com.spotify.playlistmanager.ui.screens.settings.SettingsScreen
@@ -50,6 +52,7 @@ sealed class Screen(val route: String) {
 
     data object Generate : Screen("generate")
     data object Stepwise : Screen("stepwise")
+    data object Party : Screen("party")
     data object Templates : Screen("templates")
     data object Settings : Screen("settings")
     data object Profile : Screen("profile")
@@ -68,6 +71,7 @@ private val bottomNavItems = listOf(
     BottomNavItem(Screen.Playlists, "Playlisty", Icons.Default.LibraryMusic),
     BottomNavItem(Screen.Generate, "Generuj", Icons.Default.AutoAwesome),
     BottomNavItem(Screen.Stepwise, "Krok", Icons.Default.Queue),
+    BottomNavItem(Screen.Party, "Impreza", Icons.Default.Celebration),
     BottomNavItem(Screen.Profile, "Profil", Icons.Default.Person)
 )
 
@@ -75,6 +79,7 @@ private val bottomBarRoutes = setOf(
     Screen.Playlists.route,
     Screen.Generate.route,
     Screen.Stepwise.route,
+    Screen.Party.route,
     Screen.Profile.route
 )
 
@@ -231,6 +236,10 @@ fun AppNavGraph(
 
         composable(Screen.Stepwise.route) {
             StepwiseScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.Party.route) {
+            PartyScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Profile.route) {
