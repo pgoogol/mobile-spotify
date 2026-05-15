@@ -44,6 +44,11 @@ class PartyPlanner(
         val phaseByBlock: List<Phase>
     )
 
+    /**
+     * @param blockSizeByStyle rozmiar bloku osobno dla każdego stylu
+     *        (np. `{SALSA: 3, BACHATA: 4}` = tanda 3:4). Spec sekcja 13.
+     *        Brak klucza dla stylu → [DEFAULT_BLOCK_SIZE].
+     */
     fun plan(
         state: PartyState,
         analyzedByStyle: Map<Style, List<AnalyzedTrack>>,
@@ -51,14 +56,21 @@ class PartyPlanner(
         ratio: StyleRatio,
         arc: EnergyArc,
         @Suppress("UNUSED_PARAMETER") strategy: SubstyleStrategy = SubstyleStrategy.CLASSIC,
-        blockSize: Int = DEFAULT_BLOCK_SIZE
+        blockSizeByStyle: Map<Style, Int> = mapOf(
+            Style.SALSA to DEFAULT_BLOCK_SIZE,
+            Style.BACHATA to DEFAULT_BLOCK_SIZE
+        )
     ): PlanResult {
-        require(blockSize in 3..10) { "Rozmiar bloku musi być w [3..10], jest $blockSize" }
+        blockSizeByStyle.values.forEach { size ->
+            require(size in 3..10) { "Rozmiar bloku musi być w [3..10], jest $size" }
+        }
+
+        val avgBlockSize = blockSizeByStyle.values.average().toInt().coerceAtLeast(3)
 
         // Faza → liczba bloków (proporcjonalnie do share, min 1 blok / faza)
         val shares = arc.phaseShares()
-        val totalSlots = (durationMs / BlockGenerator.AVERAGE_TRACK_MS).toInt().coerceAtLeast(blockSize)
-        val totalBlocks = (totalSlots / blockSize).coerceAtLeast(shares.size)
+        val totalSlots = (durationMs / BlockGenerator.AVERAGE_TRACK_MS).toInt().coerceAtLeast(avgBlockSize)
+        val totalBlocks = (totalSlots / avgBlockSize).coerceAtLeast(shares.size)
         val blocksPerShare = shares.map { share ->
             (share.share * totalBlocks).toInt().coerceAtLeast(1) to share.phase
         }
@@ -82,6 +94,7 @@ class PartyPlanner(
             val style = stylePattern[i]
             val profile = StyleProfile.forStyle(style)
             val analyzedPool = analyzedByStyle[style].orEmpty()
+            val n = blockSizeByStyle[style] ?: DEFAULT_BLOCK_SIZE
 
             val shape: EnergyShape = phase.defaultShape
 
@@ -89,7 +102,7 @@ class PartyPlanner(
                 state = simState,
                 profile = profile,
                 analyzedPool = analyzedPool,
-                n = blockSize,
+                n = n,
                 shape = shape,
                 startAnchor = null,
                 weights = CostWeights.PLANNING,

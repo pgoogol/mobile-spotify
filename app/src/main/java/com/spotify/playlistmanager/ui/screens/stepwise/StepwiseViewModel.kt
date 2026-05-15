@@ -5,6 +5,17 @@ import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.data.model.TrackAudioFeatures
+import com.spotify.playlistmanager.domain.dj.LiveAssistant
+import com.spotify.playlistmanager.domain.dj.PartyPlanner
+import com.spotify.playlistmanager.domain.dj.TrackAnalyzer
+import com.spotify.playlistmanager.domain.dj.model.AnalyzedTrack
+import com.spotify.playlistmanager.domain.dj.model.EnergyArc
+import com.spotify.playlistmanager.domain.dj.model.EnergyShape
+import com.spotify.playlistmanager.domain.dj.model.PartyMode
+import com.spotify.playlistmanager.domain.dj.model.PartyState
+import com.spotify.playlistmanager.domain.dj.model.Preset
+import com.spotify.playlistmanager.domain.dj.model.Style
+import com.spotify.playlistmanager.domain.dj.model.StyleRatio
 import com.spotify.playlistmanager.domain.model.NextTrackTarget
 import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
@@ -119,6 +130,24 @@ data class AutoFillSnapshot(
     val addedCount: Int
 )
 
+/**
+ * Tryby pracy ekranu Krok — który flow user-a jest aktywny.
+ *
+ * Trzy tryby:
+ *  - [STEPWISE] — klasyczny krok-po-kroku: mood buttons → top-K → pick.
+ *  - [PLAN] — generator imprezy: ustaw czas i łuk → wygeneruj wszystkie bloki naraz.
+ *  - [LIVE] — generator bloków na żądanie: preset → kolejny blok dorzucany do sesji.
+ *
+ * Wszystkie tryby pracują na tej samej puli (poolA + opcjonalnie poolB)
+ * i tej samej [TandaStructure] (countA/countB = rozmiar bloku salsy/bachaty).
+ * Wynikowe utwory zawsze trafiają do `sessionTracks` — wspólny zapis na koniec.
+ */
+enum class GeneratorMode(val displayName: String) {
+    STEPWISE("Krok po kroku"),
+    PLAN("Plan imprezy"),
+    LIVE("Live bloki")
+}
+
 /** Stan zapisu playlisty do Spotify. */
 sealed class SaveState {
     data object Idle : SaveState()
@@ -180,6 +209,22 @@ data class StepwiseUiState(
     // ── Podgląd informacji o utworze (bottom sheet) ────────
     val trackDetailSheet: TrackDetailSheet? = null,
 
+    // ── Generator bloków (Plan imprezy / Live) ─────────────
+    val generatorMode: GeneratorMode = GeneratorMode.STEPWISE,
+    /** Przeanalizowana pula utworów per styl (cache po zmianie poolA/poolB). */
+    val analyzedByStyle: Map<Style, List<AnalyzedTrack>> = emptyMap(),
+    val isAnalyzingPool: Boolean = false,
+    /** Plan imprezy — czas trwania w ms (slider 30 min – 6 h). */
+    val planDurationMs: Long = 90 * 60_000L,
+    /** Plan imprezy — łuk energii. */
+    val energyArc: EnergyArc = EnergyArc.CLASSIC,
+    /** Live — wybrany kształt do generowania kolejnego bloku. */
+    val liveShape: EnergyShape = EnergyShape.Wave(),
+    /** Live — ostatnio użyty preset (do podświetlenia w UI). */
+    val livePreset: Preset? = null,
+    val isGeneratingPlan: Boolean = false,
+    val isGeneratingLiveBlock: Boolean = false,
+
     // ── Błędy ───────────────────────────────────────────────
     val error: String? = null
 ) {
@@ -229,7 +274,10 @@ class StepwiseViewModel @Inject constructor(
     private val spotifyRepository: ISpotifyRepository,
     private val featuresRepository: ITrackFeaturesRepository,
     private val suggestUseCase: SuggestNextTrackUseCase,
-    private val preferencesStore: StepwisePreferencesStore
+    private val preferencesStore: StepwisePreferencesStore,
+    private val trackAnalyzer: TrackAnalyzer,
+    private val partyPlanner: PartyPlanner,
+    private val liveAssistant: LiveAssistant
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(StepwiseUiState())
@@ -429,12 +477,14 @@ class StepwiseViewModel @Inject constructor(
             _state.update { current ->
                 when (which) {
                     ActivePool.A -> current.copy(
-                        poolA = current.poolA.copy(tracks = tracks, featuresLoaded = true)
+                        poolA = current.poolA.copy(tracks = tracks, featuresLoaded = true),
+                        analyzedByStyle = emptyMap()  // invalidate — pula zmienila sie
                     )
                     ActivePool.B -> current.copy(
                         poolB = (current.poolB ?: PoolSlot()).copy(
                             tracks = tracks, featuresLoaded = true
-                        )
+                        ),
+                        analyzedByStyle = emptyMap()
                     )
                 }
             }
@@ -1030,6 +1080,201 @@ class StepwiseViewModel @Inject constructor(
 
     fun onClearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    // ── Generator bloków (Plan imprezy / Live) ──────────────────────────
+
+    fun onGeneratorModeChange(mode: GeneratorMode) {
+        _state.update { it.copy(generatorMode = mode) }
+        // Lazy prefetch — gdy user wchodzi w PLAN/LIVE i nie mamy jeszcze analizy puli
+        if (mode != GeneratorMode.STEPWISE && _state.value.analyzedByStyle.isEmpty()) {
+            viewModelScope.launch { ensureAnalyzedPool() }
+        }
+    }
+
+    fun onPlanDurationChange(ms: Long) {
+        _state.update { it.copy(planDurationMs = ms.coerceAtLeast(30 * 60_000L)) }
+    }
+
+    fun onEnergyArcChange(arc: EnergyArc) {
+        _state.update { it.copy(energyArc = arc) }
+    }
+
+    fun onLiveShapeChange(shape: EnergyShape) {
+        _state.update { it.copy(liveShape = shape) }
+    }
+
+    /**
+     * Plan imprezy — wywołuje [PartyPlanner.plan] i konwertuje wszystkie wynikowe
+     * bloki na [SessionTrack]'i, dorzucając je do sesji.
+     *
+     * Mapowanie: TandaStructure(countA, countB) → blockSize per styl, gdzie
+     * A = SALSA, B = BACHATA. Proporcja S:B liczona z tej samej struktury.
+     * Bez ustawionej tandy: defaultowy rozmiar bloku 5 i proporcja 50:50.
+     */
+    fun onGeneratePlanClick() {
+        viewModelScope.launch {
+            _state.update { it.copy(isGeneratingPlan = true, error = null) }
+            val analyzed = ensureAnalyzedPool()
+            if (analyzed.values.all { it.isEmpty() }) {
+                _state.update { it.copy(isGeneratingPlan = false, error = "Pula pusta — wybierz playliste") }
+                return@launch
+            }
+
+            val s = _state.value
+            val tanda = s.tandaStructure
+            val salsaSize = (tanda?.countA ?: PartyPlanner.DEFAULT_BLOCK_SIZE).coerceIn(3, 10)
+            val bachataSize = (tanda?.countB ?: PartyPlanner.DEFAULT_BLOCK_SIZE).coerceIn(3, 10)
+            val ratio = if (tanda != null) {
+                StyleRatio(
+                    salsaPercent = (tanda.countA.toFloat() / tanda.totalPerTanda * 100).toInt()
+                        .coerceIn(0, 100)
+                )
+            } else StyleRatio(salsaPercent = 50)
+
+            val partyState = PartyState(
+                mode = PartyMode.PLANNING,
+                playedTrackIds = s.sessionTracks.mapNotNull { it.track.id }.toSet()
+            )
+            val plan = partyPlanner.plan(
+                state = partyState,
+                analyzedByStyle = analyzed,
+                durationMs = s.planDurationMs,
+                ratio = ratio,
+                arc = s.energyArc,
+                blockSizeByStyle = mapOf(
+                    Style.SALSA to salsaSize,
+                    Style.BACHATA to bachataSize
+                )
+            )
+
+            val newSessionTracks = plan.blocks.flatMapIndexed { blockIdx, block ->
+                block.tracks.mapIndexed { slotIdx, at ->
+                    SessionTrack(
+                        track = at.track,
+                        pool = if (block.style == Style.SALSA) ActivePool.A else ActivePool.B,
+                        score = at.energyScore,
+                        targetScore = block.targetScores.getOrNull(slotIdx) ?: at.energyScore,
+                        axis = ScoreAxis.DANCE,
+                        targetLabel = "Plan #${blockIdx + 1}: ${block.shape.displayName}",
+                        bpm = at.audio.bpm,
+                        camelot = at.audio.camelot
+                    )
+                }
+            }
+
+            _state.update { current ->
+                current.copy(
+                    sessionTracks = current.sessionTracks + newSessionTracks,
+                    isGeneratingPlan = false,
+                    error = plan.errors.firstOrNull()?.let { (idx, e) ->
+                        "Blok #$idx pominiety: ${e.message}"
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Live — wywołuje [LiveAssistant.nextBlock] dla aktywnej puli i dorzuca utwory
+     * do sesji. Pula → styl: A=SALSA, B=BACHATA. Rozmiar bloku z [TandaStructure].
+     * Anchor energii = ostatni SessionTrack tej samej puli (jeśli istnieje).
+     * Auto-switch puli po zbudowaniu bloku (jak w mood-button flow).
+     */
+    fun onLivePresetClick(preset: Preset) {
+        viewModelScope.launch {
+            _state.update { it.copy(isGeneratingLiveBlock = true, livePreset = preset, error = null) }
+            val analyzed = ensureAnalyzedPool()
+            val s = _state.value
+            val activeStyle = if (s.activePool == ActivePool.A) Style.SALSA else Style.BACHATA
+            val pool = analyzed[activeStyle].orEmpty()
+            if (pool.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        isGeneratingLiveBlock = false,
+                        error = "Pula dla ${activeStyle.name} pusta (sprawdz wybor playlisty / genres w CSV)"
+                    )
+                }
+                return@launch
+            }
+
+            val tanda = s.tandaStructure
+            val n = (
+                if (tanda != null) (if (activeStyle == Style.SALSA) tanda.countA else tanda.countB)
+                else PartyPlanner.DEFAULT_BLOCK_SIZE
+            ).coerceIn(3, 10)
+
+            val lastForStyle = s.sessionTracks.lastOrNull {
+                it.pool == s.activePool
+            }
+            val anchorId = lastForStyle?.track?.id
+            val partyState = PartyState(
+                mode = PartyMode.LIVE,
+                playedTrackIds = s.sessionTracks.mapNotNull { it.track.id }.toSet(),
+                lastPlayedIdByStyle = if (anchorId != null) mapOf(activeStyle to anchorId) else emptyMap()
+            )
+
+            val result = liveAssistant.nextBlock(
+                state = partyState,
+                style = activeStyle,
+                analyzedPool = pool,
+                preset = preset,
+                n = n
+            )
+
+            result.onSuccess { block ->
+                val newSessionTracks = block.tracks.mapIndexed { slotIdx, at ->
+                    SessionTrack(
+                        track = at.track,
+                        pool = s.activePool,
+                        score = at.energyScore,
+                        targetScore = block.targetScores.getOrNull(slotIdx) ?: at.energyScore,
+                        axis = ScoreAxis.DANCE,
+                        targetLabel = "Live: ${preset.label} (${block.shape.displayName})",
+                        bpm = at.audio.bpm,
+                        camelot = at.audio.camelot
+                    )
+                }
+                val newActive = if (s.poolB != null) {
+                    if (s.activePool == ActivePool.A) ActivePool.B else ActivePool.A
+                } else s.activePool
+
+                _state.update { current ->
+                    current.copy(
+                        sessionTracks = current.sessionTracks + newSessionTracks,
+                        activePool = newActive,
+                        isGeneratingLiveBlock = false
+                    )
+                }
+            }.onFailure { e ->
+                _state.update {
+                    it.copy(
+                        isGeneratingLiveBlock = false,
+                        error = e.message ?: "Nie udalo sie zbudowac bloku"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Cache'owana analiza puli (poolA + poolB) — uruchamiana lazy.
+     * Wynik trafia do `state.analyzedByStyle` i jest invalidowany przy zmianie pul.
+     */
+    private suspend fun ensureAnalyzedPool(): Map<Style, List<AnalyzedTrack>> {
+        val cached = _state.value.analyzedByStyle
+        if (cached.isNotEmpty()) return cached
+
+        _state.update { it.copy(isAnalyzingPool = true) }
+        val s = _state.value
+        val combined = (s.poolA.tracks + (s.poolB?.tracks ?: emptyList())).distinctBy { it.id }
+        val ids = combined.mapNotNull { it.id }
+        val features = runCatching {
+            featuresRepository.getFeaturesMap(ids)
+        }.getOrDefault(emptyMap())
+        val result = trackAnalyzer.analyzePool(combined, features)
+        _state.update { it.copy(analyzedByStyle = result, isAnalyzingPool = false) }
+        return result
     }
 
     // ── Pomocnicze ──────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package com.spotify.playlistmanager.ui.screens.stepwise
 
@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -95,6 +97,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.Track
+import com.spotify.playlistmanager.domain.dj.model.EnergyArc
+import com.spotify.playlistmanager.domain.dj.model.Preset
 import com.spotify.playlistmanager.domain.model.NextTrackTarget
 import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.usecase.SuggestNextTrackUseCase
@@ -218,6 +222,36 @@ fun StepwiseScreen(
                 )
             }
 
+            GeneratorModeSection(
+                mode = state.generatorMode,
+                onModeChange = viewModel::onGeneratorModeChange
+            )
+
+            when (state.generatorMode) {
+                GeneratorMode.PLAN -> PlanInputsSection(
+                    durationMs = state.planDurationMs,
+                    arc = state.energyArc,
+                    isGenerating = state.isGeneratingPlan,
+                    isAnalyzing = state.isAnalyzingPool,
+                    poolReady = state.poolA.playlist != null,
+                    onDurationChange = viewModel::onPlanDurationChange,
+                    onArcChange = viewModel::onEnergyArcChange,
+                    onGenerate = viewModel::onGeneratePlanClick
+                )
+
+                GeneratorMode.LIVE -> LiveInputsSection(
+                    isGenerating = state.isGeneratingLiveBlock,
+                    isAnalyzing = state.isAnalyzingPool,
+                    poolReady = state.poolA.playlist != null,
+                    activePool = state.activePool,
+                    hasPoolB = state.hasPoolB,
+                    lastPreset = state.livePreset,
+                    onPreset = viewModel::onLivePresetClick
+                )
+
+                GeneratorMode.STEPWISE -> Unit
+            }
+
             SessionTracksSection(
                 tracks = state.sessionTracks,
                 onUndoLast = viewModel::onUndoLast,
@@ -238,36 +272,39 @@ fun StepwiseScreen(
                 SessionEnergyMiniSection(tracks = state.sessionTracks)
             }
 
-            ResolvedTargetBadge(
-                score = state.resolvedTargetScore,
-                axis = state.resolvedAxis,
-                axisOfLast = state.currentAxis,
-                hasContext = state.sessionTracks.isNotEmpty()
-            )
+            // Mood buttons + kandydaci + badge — tylko w trybie STEPWISE
+            if (state.generatorMode == GeneratorMode.STEPWISE) {
+                ResolvedTargetBadge(
+                    score = state.resolvedTargetScore,
+                    axis = state.resolvedAxis,
+                    axisOfLast = state.currentAxis,
+                    hasContext = state.sessionTracks.isNotEmpty()
+                )
 
-            MoodButtonsSection(
-                currentTarget = state.currentTarget,
-                hasContext = state.sessionTracks.any { it.pool == state.activePool },
-                onTargetClick = viewModel::onTargetClick
-            )
+                MoodButtonsSection(
+                    currentTarget = state.currentTarget,
+                    hasContext = state.sessionTracks.any { it.pool == state.activePool },
+                    onTargetClick = viewModel::onTargetClick
+                )
 
-            CandidatesSection(
-                candidates = state.candidates,
-                isLoading = state.isComputingCandidates,
-                poolSelected = state.activePoolSlot.playlist != null,
-                canAutoFill = state.canAutoFill,
-                remainingInBlock = state.remainingInBlock,
-                isAutoFilling = state.isAutoFilling,
-                onPick = viewModel::onPickCandidate,
-                onAutoFill = viewModel::onAutoFillBlock,
-                onShowDetail = viewModel::onShowTrackDetail
-            )
+                CandidatesSection(
+                    candidates = state.candidates,
+                    isLoading = state.isComputingCandidates,
+                    poolSelected = state.activePoolSlot.playlist != null,
+                    canAutoFill = state.canAutoFill,
+                    remainingInBlock = state.remainingInBlock,
+                    isAutoFilling = state.isAutoFilling,
+                    onPick = viewModel::onPickCandidate,
+                    onAutoFill = viewModel::onAutoFillBlock,
+                    onShowDetail = viewModel::onShowTrackDetail
+                )
 
-            AdvancedWeightsSection(
-                weights = state.weights,
-                onUpdateWeight = viewModel::onUpdateWeight,
-                onReset = viewModel::onResetWeights
-            )
+                AdvancedWeightsSection(
+                    weights = state.weights,
+                    onUpdateWeight = viewModel::onUpdateWeight,
+                    onReset = viewModel::onResetWeights
+                )
+            }
 
             Spacer(Modifier.height(24.dp))
         }
@@ -2043,6 +2080,155 @@ private fun SaveSuccessDialog(
             TextButton(onClick = onDismiss) { Text("Zamknij") }
         }
     )
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Generator bloków (Plan imprezy / Live)
+// ══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun GeneratorModeSection(
+    mode: GeneratorMode,
+    onModeChange: (GeneratorMode) -> Unit
+) {
+    SectionCard(title = "Tryb pracy") {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            GeneratorMode.entries.forEach { m ->
+                FilterChip(
+                    selected = mode == m,
+                    onClick = { onModeChange(m) },
+                    label = { Text(m.displayName) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        val hint = when (mode) {
+            GeneratorMode.STEPWISE -> "Mood buttons → top-5 → wybór ręczny."
+            GeneratorMode.PLAN -> "Ustaw czas i łuk → wygeneruj wszystkie bloki naraz."
+            GeneratorMode.LIVE -> "Wygeneruj kolejny blok jednym kliknięciem (preset)."
+        }
+        Text(
+            hint,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun PlanInputsSection(
+    durationMs: Long,
+    arc: EnergyArc,
+    isGenerating: Boolean,
+    isAnalyzing: Boolean,
+    poolReady: Boolean,
+    onDurationChange: (Long) -> Unit,
+    onArcChange: (EnergyArc) -> Unit,
+    onGenerate: () -> Unit
+) {
+    SectionCard(title = "Plan imprezy") {
+        val minutes = (durationMs / 60_000L).toInt()
+        Text(
+            "Czas trwania: ${minutes / 60}h ${minutes % 60}min",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Slider(
+            value = minutes.toFloat(),
+            onValueChange = { onDurationChange(it.toLong() * 60_000L) },
+            valueRange = 30f..360f,
+            steps = 32,
+            colors = SliderDefaults.colors(thumbColor = SpotifyGreen, activeTrackColor = SpotifyGreen)
+        )
+
+        var arcExpanded by remember { mutableStateOf(false) }
+        ExposedDropdownMenuBox(
+            expanded = arcExpanded,
+            onExpandedChange = { arcExpanded = it }
+        ) {
+            OutlinedTextField(
+                value = arc.displayName,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Łuk energii") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = arcExpanded) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+            )
+            ExposedDropdownMenu(
+                expanded = arcExpanded,
+                onDismissRequest = { arcExpanded = false }
+            ) {
+                EnergyArc.entries.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option.displayName) },
+                        onClick = {
+                            onArcChange(option)
+                            arcExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
+        Text(
+            "Rozmiar bloku: salsa = countA, bachata = countB ze struktury tandy powyżej.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (isAnalyzing) LoadingRow("Analizuję pulę…")
+
+        Button(
+            onClick = onGenerate,
+            enabled = poolReady && !isGenerating && !isAnalyzing,
+            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isGenerating) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Generuję plan…")
+            } else {
+                Text("Wygeneruj plan")
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveInputsSection(
+    isGenerating: Boolean,
+    isAnalyzing: Boolean,
+    poolReady: Boolean,
+    activePool: ActivePool,
+    hasPoolB: Boolean,
+    lastPreset: Preset?,
+    onPreset: (Preset) -> Unit
+) {
+    SectionCard(title = "Live — kolejny blok") {
+        val styleHint = if (hasPoolB) {
+            "Aktywna pula: ${if (activePool == ActivePool.A) "A (salsa)" else "B (bachata)"} — kliknij preset, " +
+                "blok pójdzie do sesji, pula się przełączy."
+        } else {
+            "Tylko pula A — wszystkie bloki z tego stylu (włącz pulę B by przeplatać)."
+        }
+        Text(styleHint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        if (isAnalyzing) LoadingRow("Analizuję pulę…")
+
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Preset.entries.forEach { preset ->
+                FilterChip(
+                    selected = lastPreset == preset,
+                    onClick = { onPreset(preset) },
+                    label = { Text(preset.label, fontSize = 12.sp) },
+                    enabled = poolReady && !isGenerating && !isAnalyzing
+                )
+            }
+        }
+        if (isGenerating) LoadingRow("Buduję blok…")
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════

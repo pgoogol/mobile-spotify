@@ -93,9 +93,6 @@ dependencies {
     // DataStore – przechowywanie tokenu
     implementation(libs.datastore)
 
-    // kotlinx.serialization – JSON dla PartyStateStore (DataStore)
-    implementation(libs.kotlinx.serialization.json)
-
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
