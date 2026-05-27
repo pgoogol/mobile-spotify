@@ -29,7 +29,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -37,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -49,9 +52,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.spotify.playlistmanager.BuildConfig
+import com.spotify.playlistmanager.domain.usecase.BuildAllInPlaylistUseCase
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +72,7 @@ fun SettingsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val offlineProgress by viewModel.offlineProgress.collectAsStateWithLifecycle()
     val isOfflineMode by viewModel.isOfflineMode.collectAsStateWithLifecycle()
+    val allInProgress by viewModel.allInProgress.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(state.actionMessage) {
@@ -150,12 +157,23 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Tryb offline (toggle) ────────────────────────────────────
+            // ── Tryb offline (toggle + progres budowy All-in) ────────────
             SettingsSection(title = "Tryb offline") {
                 OfflineModeToggleRow(
                     enabled = isOfflineMode,
+                    busy = allInProgress != null &&
+                        allInProgress?.phase != BuildAllInPlaylistUseCase.Progress.Phase.DONE &&
+                        allInProgress?.phase != BuildAllInPlaylistUseCase.Progress.Phase.ERROR,
                     onChange = viewModel::setOfflineMode
                 )
+                allInProgress?.let { progress ->
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    AllInProgressRow(
+                        progress = progress,
+                        onCancel = viewModel::cancelAllInBuild,
+                        onDismiss = viewModel::clearAllInProgress
+                    )
+                }
             }
 
             // ── Przygotowanie offline (preload) ──────────────────────────
@@ -241,6 +259,7 @@ private fun SettingsInfoRow(
 @Composable
 private fun OfflineModeToggleRow(
     enabled: Boolean,
+    busy: Boolean,
     onChange: (Boolean) -> Unit
 ) {
     Row(
@@ -262,22 +281,117 @@ private fun OfflineModeToggleRow(
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                text = if (enabled)
-                    "Dane czytane z lokalnej bazy — brak requestów do Spotify."
-                else
-                    "Dane czytane z lokalnej bazy gdy są świeże, inaczej z API.",
+                text = when {
+                    busy -> "Buduję playlistę All-in…"
+                    enabled -> "Dane czytane z lokalnej bazy — brak requestów do Spotify."
+                    else -> "Włączenie utworzy playlistę „All-in” ze wszystkimi Twoimi utworami."
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Switch(
-            checked = enabled,
+            checked = enabled || busy,
             onCheckedChange = onChange,
+            enabled = !busy,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = SpotifyGreen
             )
         )
+    }
+}
+
+@Composable
+private fun AllInProgressRow(
+    progress: BuildAllInPlaylistUseCase.Progress,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        val label = when (progress.phase) {
+            BuildAllInPlaylistUseCase.Progress.Phase.PLAYLISTS ->
+                "Pobieram listę Twoich playlist…"
+            BuildAllInPlaylistUseCase.Progress.Phase.TRACKS ->
+                "Pobieram utwory z: ${progress.currentPlaylistName ?: "…"}"
+            BuildAllInPlaylistUseCase.Progress.Phase.BUILDING ->
+                "Przygotowuję playlistę „All-in” (${progress.tracksCount} unikalnych utworów)…"
+            BuildAllInPlaylistUseCase.Progress.Phase.UPDATING ->
+                "Zapisuję ${progress.tracksCount} utworów do „All-in”…"
+            BuildAllInPlaylistUseCase.Progress.Phase.DONE ->
+                "Gotowe — „All-in” zawiera ${progress.tracksCount} utworów."
+            BuildAllInPlaylistUseCase.Progress.Phase.ERROR ->
+                progress.errors.lastOrNull() ?: "Wystąpił błąd."
+        }
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = when (progress.phase) {
+                BuildAllInPlaylistUseCase.Progress.Phase.ERROR -> MaterialTheme.colorScheme.error
+                BuildAllInPlaylistUseCase.Progress.Phase.DONE -> SpotifyGreen
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            fontWeight = FontWeight.SemiBold
+        )
+
+        when (progress.phase) {
+            BuildAllInPlaylistUseCase.Progress.Phase.TRACKS,
+            BuildAllInPlaylistUseCase.Progress.Phase.PLAYLISTS,
+            BuildAllInPlaylistUseCase.Progress.Phase.BUILDING,
+            BuildAllInPlaylistUseCase.Progress.Phase.UPDATING -> {
+                val fraction = if (progress.total > 0)
+                    progress.current.toFloat() / progress.total
+                else 0f
+                if (progress.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = SpotifyGreen,
+                        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    )
+                    Text(
+                        text = "${progress.current} / ${progress.total}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = SpotifyGreen,
+                        trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Anuluj") }
+            }
+
+            BuildAllInPlaylistUseCase.Progress.Phase.DONE,
+            BuildAllInPlaylistUseCase.Progress.Phase.ERROR -> {
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("OK")
+                }
+            }
+        }
+
+        if (progress.errors.isNotEmpty() &&
+            progress.phase != BuildAllInPlaylistUseCase.Progress.Phase.ERROR
+        ) {
+            Text(
+                text = "Problemy (${progress.errors.size}): " +
+                    progress.errors.take(3).joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
     }
 }
 

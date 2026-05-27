@@ -74,6 +74,17 @@ interface SpotifyApiService {
         @Body request: AddTracksRequest
     ): Map<String, String>
 
+    /**
+     * Zastępuje całą zawartość playlisty pierwszym chunkiem (do 100 utworów).
+     * Aby zastąpić >100 utworów: użyj tego endpointu na pierwsze 100,
+     * potem [addTracksToPlaylist] (POST) na każdy kolejny chunk.
+     */
+    @PUT("v1/playlists/{playlist_id}/tracks")
+    suspend fun replacePlaylistTracks(
+        @Path("playlist_id") playlistId: String,
+        @Body request: AddTracksRequest
+    ): Map<String, String>
+
     // ── Odtwarzacz ─────────────────────────────────────────────────────────
 
     /**

@@ -240,6 +240,23 @@ class SpotifyRepository @Inject constructor(
             cache.invalidateTracks(playlistId)
         }
 
+    override suspend fun replacePlaylistTracks(playlistId: String, uris: List<String>) =
+        withContext(Dispatchers.IO) {
+            val chunks = uris.chunked(100)
+            if (chunks.isEmpty()) {
+                // Wyczyść playlistę (przesyłamy pustą listę URI)
+                api.replacePlaylistTracks(playlistId, AddTracksRequest(uris = emptyList()))
+            } else {
+                // Pierwszy chunk: PUT zastępuje cała zawartość
+                api.replacePlaylistTracks(playlistId, AddTracksRequest(uris = chunks.first()))
+                // Pozostałe chunki: POST dokleja na koniec
+                chunks.drop(1).forEach { chunk ->
+                    api.addTracksToPlaylist(playlistId, AddTracksRequest(uris = chunk))
+                }
+            }
+            cache.invalidateTracks(playlistId)
+        }
+
     // ════════════════════════════════════════════════════════
     //  Kolejka odtwarzania
     // ════════════════════════════════════════════════════════
