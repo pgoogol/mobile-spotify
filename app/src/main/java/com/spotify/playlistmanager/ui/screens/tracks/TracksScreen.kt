@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
@@ -44,8 +43,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SheetState
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -97,14 +94,6 @@ fun TracksScreen(
     var sheetFeatures by remember { mutableStateOf<TrackAudioFeatures?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Snackbar dla komunikatów (np. po dodaniu do kolejki)
-    val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(viewModel) {
-        viewModel.events.collect { msg ->
-            snackbarHostState.showSnackbar(msg)
-        }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -122,8 +111,7 @@ fun TracksScreen(
                     }
                 }
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -187,8 +175,7 @@ fun TracksScreen(
                                 onInfoClick = {
                                     sheetTrack = track
                                     sheetFeatures = featuresMap[track.id]
-                                },
-                                onQueueClick = { viewModel.addToQueue(track) }
+                                }
                             )
                             HorizontalDivider(
                                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
@@ -299,8 +286,7 @@ private fun SortHeaderRow(
 private fun TrackRow(
     track: Track,
     features: TrackAudioFeatures?,
-    onInfoClick: () -> Unit,
-    onQueueClick: () -> Unit
+    onInfoClick: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -378,36 +364,23 @@ private fun TrackRow(
                 }
             }
 
-            // Czas + akcje (info, dodaj do kolejki)
+            // Czas + przycisk info
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = track.formattedDuration(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onQueueClick,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.QueueMusic,
-                            contentDescription = "Dodaj do kolejki",
-                            modifier = Modifier.size(18.dp),
-                            tint = SpotifyGreen
-                        )
-                    }
-                    IconButton(
-                        onClick = onInfoClick,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = "Szczegóły",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                IconButton(
+                    onClick = onInfoClick,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = "Szczegóły",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }

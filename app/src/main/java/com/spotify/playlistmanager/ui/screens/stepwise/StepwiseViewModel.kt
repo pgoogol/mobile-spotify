@@ -18,16 +18,21 @@ import com.spotify.playlistmanager.domain.dj.model.Style
 import com.spotify.playlistmanager.domain.dj.model.StyleRatio
 import com.spotify.playlistmanager.domain.model.NextTrackTarget
 import com.spotify.playlistmanager.domain.model.ScoreAxis
+import com.spotify.playlistmanager.domain.repository.AddToQueueResult
+import com.spotify.playlistmanager.domain.repository.IQueueRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import com.spotify.playlistmanager.domain.usecase.SuggestNextTrackUseCase
 import com.spotify.playlistmanager.util.StepwisePreferencesStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -277,11 +282,35 @@ class StepwiseViewModel @Inject constructor(
     private val preferencesStore: StepwisePreferencesStore,
     private val trackAnalyzer: TrackAnalyzer,
     private val partyPlanner: PartyPlanner,
-    private val liveAssistant: LiveAssistant
+    private val liveAssistant: LiveAssistant,
+    private val queueRepository: IQueueRepository
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(StepwiseUiState())
     val state: StateFlow<StepwiseUiState> = _state.asStateFlow()
+
+    /** Jednorazowe komunikaty UI po dodaniu utworu do kolejki (snackbar). */
+    private val _queueEvents = Channel<String>(Channel.BUFFERED)
+    val queueEvents: Flow<String> = _queueEvents.receiveAsFlow()
+
+    /**
+     * Dodaje utwór do kolejki. Online: lokalna kolejka + Spotify Web API.
+     * Offline: tylko lokalna kolejka. Wynik raportowany snackbarem.
+     */
+    fun addToQueue(track: Track) {
+        viewModelScope.launch {
+            val short = track.title.take(40)
+            val msg = when (val r = queueRepository.addToQueue(track)) {
+                AddToQueueResult.Success ->
+                    "Dodano do kolejki Spotify: $short"
+                AddToQueueResult.SavedOffline ->
+                    "Dodano do lokalnej kolejki (offline): $short"
+                is AddToQueueResult.SavedRemoteFailed ->
+                    "Zapisano lokalnie — ${r.reason}"
+            }
+            _queueEvents.send(msg)
+        }
+    }
 
     init {
         loadAvailablePlaylists()

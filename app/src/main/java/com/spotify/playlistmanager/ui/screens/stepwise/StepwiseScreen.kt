@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
@@ -132,6 +133,13 @@ fun StepwiseScreen(
         state.error?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.onClearError()
+        }
+    }
+
+    // Snackbar po dodaniu utworu do kolejki
+    LaunchedEffect(viewModel) {
+        viewModel.queueEvents.collect { msg ->
+            snackbarHostState.showSnackbar(msg)
         }
     }
 
@@ -257,7 +265,8 @@ fun StepwiseScreen(
                 onUndoLast = viewModel::onUndoLast,
                 onClear = viewModel::onClearSession,
                 onAddFromAnyPlaylist = viewModel::onOpenManualTrackPicker,
-                onShowDetail = viewModel::onShowTrackDetail
+                onShowDetail = viewModel::onShowTrackDetail,
+                onQueueTrack = viewModel::addToQueue
             )
 
             state.autoFillSnapshot?.let { snapshot ->
@@ -296,7 +305,8 @@ fun StepwiseScreen(
                     isAutoFilling = state.isAutoFilling,
                     onPick = viewModel::onPickCandidate,
                     onAutoFill = viewModel::onAutoFillBlock,
-                    onShowDetail = viewModel::onShowTrackDetail
+                    onShowDetail = viewModel::onShowTrackDetail,
+                    onQueueTrack = viewModel::addToQueue
                 )
 
                 AdvancedWeightsSection(
@@ -1034,7 +1044,8 @@ private fun SessionTracksSection(
     onUndoLast: () -> Unit,
     onClear: () -> Unit,
     onAddFromAnyPlaylist: () -> Unit,
-    onShowDetail: (Track) -> Unit
+    onShowDetail: (Track) -> Unit,
+    onQueueTrack: (Track) -> Unit
 ) {
     val anchorCount = tracks.count { it.isAnchor }
     val newCount = tracks.size - anchorCount
@@ -1079,7 +1090,8 @@ private fun SessionTracksSection(
                     SessionTrackRow(
                         number = newNumber,
                         sessionTrack = sessionTrack,
-                        onClick = { onShowDetail(sessionTrack.track) }
+                        onClick = { onShowDetail(sessionTrack.track) },
+                        onQueue = { onQueueTrack(sessionTrack.track) }
                     )
                 }
             }
@@ -1121,7 +1133,8 @@ private fun SessionTracksSection(
 private fun SessionTrackRow(
     number: Int,
     sessionTrack: SessionTrack,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onQueue: () -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1196,6 +1209,17 @@ private fun SessionTrackRow(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
+        }
+        IconButton(
+            onClick = onQueue,
+            modifier = Modifier.size(28.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.QueueMusic,
+                contentDescription = "Dodaj do kolejki",
+                tint = SpotifyGreen,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
@@ -1419,7 +1443,8 @@ private fun CandidatesSection(
     isAutoFilling: Boolean,
     onPick: (SuggestNextTrackUseCase.Candidate) -> Unit,
     onAutoFill: () -> Unit,
-    onShowDetail: (Track) -> Unit
+    onShowDetail: (Track) -> Unit,
+    onQueueTrack: (Track) -> Unit
 ) {
     SectionCard(title = "Sugestie") {
         when {
@@ -1440,7 +1465,8 @@ private fun CandidatesSection(
                         rank = idx + 1,
                         candidate = candidate,
                         onClick = { onPick(candidate) },
-                        onShowDetail = { onShowDetail(candidate.track) }
+                        onShowDetail = { onShowDetail(candidate.track) },
+                        onQueue = { onQueueTrack(candidate.track) }
                     )
                 }
             }
@@ -1483,7 +1509,8 @@ private fun CandidateRow(
     rank: Int,
     candidate: SuggestNextTrackUseCase.Candidate,
     onClick: () -> Unit,
-    onShowDetail: () -> Unit
+    onShowDetail: () -> Unit,
+    onQueue: () -> Unit
 ) {
     val compatChip = when {
         candidate.harmonicCompat >= 0.85f -> "\u2705"
@@ -1579,10 +1606,21 @@ private fun CandidateRow(
                         modifier = Modifier.size(18.dp)
                     )
                 }
+                IconButton(
+                    onClick = onQueue,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "Dodaj do kolejki",
+                        tint = SpotifyGreen,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
                 Spacer(Modifier.width(4.dp))
                 Icon(
                     Icons.Filled.MusicNote,
-                    contentDescription = "Dodaj",
+                    contentDescription = "Dodaj do sesji",
                     tint = SpotifyGreen,
                     modifier = Modifier.size(20.dp)
                 )

@@ -5,16 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.model.PlaylistStats
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.data.model.TrackAudioFeatures
-import com.spotify.playlistmanager.domain.repository.AddToQueueResult
 import com.spotify.playlistmanager.domain.repository.CachePolicy
 import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
-import com.spotify.playlistmanager.domain.repository.IQueueRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,13 +37,8 @@ enum class SortColumn(val label: String) {
 class TracksViewModel @Inject constructor(
     private val repository: ISpotifyRepository,
     private val featuresRepository: ITrackFeaturesRepository,
-    private val playlistCache: IPlaylistCacheRepository,
-    private val queueRepository: IQueueRepository
+    private val playlistCache: IPlaylistCacheRepository
 ) : ViewModel() {
-
-    /** Jednorazowe komunikaty dla UI (snackbar po dodaniu do kolejki). */
-    private val _events = Channel<String>(Channel.BUFFERED)
-    val events: Flow<String> = _events.receiveAsFlow()
 
     private val _state = MutableStateFlow(TracksUiState(isLoading = true))
     val state: StateFlow<TracksUiState> = _state.asStateFlow()
@@ -201,24 +193,4 @@ class TracksViewModel @Inject constructor(
             trackCount      = tracks.size,
             totalDurationMs = tracks.sumOf { it.durationMs.toLong() }
         )
-
-    /**
-     * Dodaje utwór do kolejki. Zawsze zapisuje lokalnie; w trybie online
-     * dodatkowo woła Spotify Web API (`/me/player/queue`). Wynik raportowany
-     * snackbarem przez kanał `events`.
-     */
-    fun addToQueue(track: Track) {
-        viewModelScope.launch {
-            val short = track.title.take(40)
-            val msg = when (val r = queueRepository.addToQueue(track)) {
-                AddToQueueResult.Success ->
-                    "Dodano do kolejki: $short"
-                AddToQueueResult.SavedOffline ->
-                    "Dodano do lokalnej kolejki (offline): $short"
-                is AddToQueueResult.SavedRemoteFailed ->
-                    "Zapisano lokalnie — ${r.reason}"
-            }
-            _events.send(msg)
-        }
-    }
 }
