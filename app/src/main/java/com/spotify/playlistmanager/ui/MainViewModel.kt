@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spotify.playlistmanager.data.api.AuthEventBus
 import com.spotify.playlistmanager.domain.usecase.LogoutUseCase
+import com.spotify.playlistmanager.util.OfflineModeManager
 import com.spotify.playlistmanager.util.SpotifyAppRemoteManager
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,7 +30,8 @@ class MainViewModel @Inject constructor(
     private val tokenManager: TokenManager,
     private val appRemoteManager: SpotifyAppRemoteManager,
     private val authEventBus: AuthEventBus,
-    private val logoutUseCase: LogoutUseCase
+    private val logoutUseCase: LogoutUseCase,
+    offlineModeManager: OfflineModeManager
 ) : ViewModel() {
 
     // ── Stany obserwowane przez UI ────────────────────────────────────────────
@@ -39,6 +41,9 @@ class MainViewModel @Inject constructor(
 
     val displayName: StateFlow<String?> = tokenManager.displayName
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    /** Globalny tryb offline — TopAppBar może pokazać badge "Offline". */
+    val isOfflineMode: StateFlow<Boolean> = offlineModeManager.isEnabled
 
     /**
      * Emituje Unit gdy token wygasł (HTTP 401).

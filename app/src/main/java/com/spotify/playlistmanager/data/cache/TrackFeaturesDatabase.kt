@@ -12,15 +12,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TemplateSourceEntity::class,
         PlaylistEntity::class,
         TrackEntity::class,
-        PlaylistTrackCrossRef::class
+        PlaylistTrackCrossRef::class,
+        QueueEntity::class
     ],
-    version  = 4,
+    version  = 5,
     exportSchema = false
 )
 abstract class TrackFeaturesDatabase : RoomDatabase() {
     abstract fun trackFeaturesDao(): TrackFeaturesDao
     abstract fun generatorTemplateDao(): GeneratorTemplateDao
     abstract fun playlistCacheDao(): PlaylistCacheDao
+    abstract fun queueDao(): QueueDao
 
     companion object {
         /**
@@ -137,6 +139,30 @@ abstract class TrackFeaturesDatabase : RoomDatabase() {
                 db.execSQL(
                     "ALTER TABLE template_sources ADD COLUMN pinned_tracks_json TEXT"
                 )
+            }
+        }
+
+        /**
+         * Migracja addytywna v4→v5.
+         * Dodaje tabelę queue_entries dla lokalnej kolejki odtwarzania.
+         * Tabela jest świadomie zdenormalizowana — przetrwa wyczyszczenie
+         * tracks_cache (clearAll) i działa również w trybie offline.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS queue_entries (
+                        id            INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        track_id      TEXT    NOT NULL,
+                        added_at      INTEGER NOT NULL,
+                        title         TEXT    NOT NULL,
+                        artist        TEXT    NOT NULL,
+                        album         TEXT    NOT NULL,
+                        album_art_url TEXT,
+                        duration_ms   INTEGER NOT NULL,
+                        uri           TEXT
+                    )
+                """.trimIndent())
             }
         }
     }

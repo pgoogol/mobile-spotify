@@ -5,6 +5,7 @@ import com.spotify.playlistmanager.data.model.*
 import com.spotify.playlistmanager.domain.repository.CachePolicy
 import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
+import com.spotify.playlistmanager.util.OfflineModeManager
 import com.spotify.playlistmanager.util.TokenManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,8 +29,18 @@ import javax.inject.Singleton
 class SpotifyRepository @Inject constructor(
     private val api: SpotifyApiService,
     private val tokenManager: TokenManager,
-    private val cache: IPlaylistCacheRepository
+    private val cache: IPlaylistCacheRepository,
+    private val offlineMode: OfflineModeManager
 ) : ISpotifyRepository {
+
+    /**
+     * Gdy globalny tryb offline jest włączony, każdy read jest przekierowany
+     * do CACHE_ONLY niezależnie od żądanej polityki. ViewModele wywołujące
+     * CACHE_FIRST lub NETWORK_ONLY nie muszą znać flagi — interpretacja
+     * polityki jest tu zcentralizowana.
+     */
+    private fun effectivePolicy(requested: CachePolicy): CachePolicy =
+        if (offlineMode.isEnabledNow()) CachePolicy.CACHE_ONLY else requested
 
     companion object {
         /** TTL listy playlist — krótkie, bo użytkownik może często zmieniać. */
@@ -51,8 +62,9 @@ class SpotifyRepository @Inject constructor(
     override suspend fun getUserPlaylists(policy: CachePolicy): List<Playlist> =
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
+            val effective = effectivePolicy(policy)
 
-            when (policy) {
+            when (effective) {
                 CachePolicy.CACHE_ONLY -> return@withContext cache.getCachedPlaylists()
 
                 CachePolicy.CACHE_FIRST -> {
@@ -71,7 +83,7 @@ class SpotifyRepository @Inject constructor(
                 cache.cachePlaylists(fresh, now)
                 fresh
             } catch (e: Exception) {
-                if (policy == CachePolicy.CACHE_FIRST) {
+                if (effective == CachePolicy.CACHE_FIRST) {
                     val stale = cache.getCachedPlaylists()
                     if (stale.isNotEmpty()) return@withContext stale
                 }
@@ -91,11 +103,13 @@ class SpotifyRepository @Inject constructor(
         playlistId: String,
         policy: CachePolicy
     ): List<Track> = withContext(Dispatchers.IO) {
-        if (policy == CachePolicy.CACHE_ONLY) {
+        val effective = effectivePolicy(policy)
+
+        if (effective == CachePolicy.CACHE_ONLY) {
             return@withContext cache.getCachedTracks(playlistId) ?: emptyList()
         }
 
-        if (policy == CachePolicy.CACHE_FIRST) {
+        if (effective == CachePolicy.CACHE_FIRST) {
             // Pobierz aktualny snapshot_id (tani request ~50B) i porównaj z cache
             val currentSnapshot = runCatching {
                 api.getPlaylistSnapshot(playlistId).snapshot_id
@@ -143,7 +157,7 @@ class SpotifyRepository @Inject constructor(
             )
             tracks
         } catch (e: Exception) {
-            if (policy == CachePolicy.CACHE_FIRST) {
+            if (effective == CachePolicy.CACHE_FIRST) {
                 val stale = cache.getCachedTracks(playlistId)
                 if (!stale.isNullOrEmpty()) return@withContext stale
             }
@@ -158,8 +172,9 @@ class SpotifyRepository @Inject constructor(
     override suspend fun getLikedTracks(policy: CachePolicy): List<Track> =
         withContext(Dispatchers.IO) {
             val now = System.currentTimeMillis()
+            val effective = effectivePolicy(policy)
 
-            when (policy) {
+            when (effective) {
                 CachePolicy.CACHE_ONLY ->
                     return@withContext cache.getCachedTracks(LIKED_ID) ?: emptyList()
 
@@ -189,7 +204,7 @@ class SpotifyRepository @Inject constructor(
                 cache.cacheTracks(likedHeader, fresh, snapshotId = null, now = now)
                 fresh
             } catch (e: Exception) {
-                if (policy == CachePolicy.CACHE_FIRST) {
+                if (effective == CachePolicy.CACHE_FIRST) {
                     val stale = cache.getCachedTracks(LIKED_ID)
                     if (!stale.isNullOrEmpty()) return@withContext stale
                 }

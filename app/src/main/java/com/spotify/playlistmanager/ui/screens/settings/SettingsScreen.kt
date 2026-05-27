@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.FileUpload
@@ -33,6 +34,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -62,6 +65,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val offlineProgress by viewModel.offlineProgress.collectAsStateWithLifecycle()
+    val isOfflineMode by viewModel.isOfflineMode.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(state.actionMessage) {
@@ -146,7 +150,15 @@ fun SettingsScreen(
                 }
             }
 
-            // ── Tryb offline ─────────────────────────────────────────────
+            // ── Tryb offline (toggle) ────────────────────────────────────
+            SettingsSection(title = "Tryb offline") {
+                OfflineModeToggleRow(
+                    enabled = isOfflineMode,
+                    onChange = viewModel::setOfflineMode
+                )
+            }
+
+            // ── Przygotowanie offline (preload) ──────────────────────────
             OfflinePrepSection(
                 progress = offlineProgress,
                 onPrepareAll = { viewModel.prepareOffline() },
@@ -222,6 +234,49 @@ private fun SettingsInfoRow(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun OfflineModeToggleRow(
+    enabled: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.CloudOff,
+            contentDescription = null,
+            tint = if (enabled) SpotifyGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Pracuj w trybie offline",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = if (enabled)
+                    "Dane czytane z lokalnej bazy — brak requestów do Spotify."
+                else
+                    "Dane czytane z lokalnej bazy gdy są świeże, inaczej z API.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = SpotifyGreen
+            )
         )
     }
 }

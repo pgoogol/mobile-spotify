@@ -6,6 +6,7 @@ import com.spotify.playlistmanager.domain.cache.IImageCacheCleaner
 import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
 import com.spotify.playlistmanager.domain.usecase.LogoutUseCase
 import com.spotify.playlistmanager.domain.usecase.PrepareOfflineUseCase
+import com.spotify.playlistmanager.util.OfflineModeManager
 import com.spotify.playlistmanager.util.TokenManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -29,7 +30,8 @@ class SettingsViewModel @Inject constructor(
     private val playlistCache: IPlaylistCacheRepository,
     private val imageCache: IImageCacheCleaner,
     private val logoutUseCase: LogoutUseCase,
-    private val prepareOfflineUseCase: PrepareOfflineUseCase
+    private val prepareOfflineUseCase: PrepareOfflineUseCase,
+    private val offlineModeManager: OfflineModeManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -42,6 +44,24 @@ class SettingsViewModel @Inject constructor(
         _offlineProgress.asStateFlow()
 
     private var offlineJob: Job? = null
+
+    // ── Globalny tryb offline ────────────────────────────────────────────
+
+    val isOfflineMode: StateFlow<Boolean> = offlineModeManager.isEnabled
+
+    fun setOfflineMode(enabled: Boolean) {
+        viewModelScope.launch {
+            offlineModeManager.setEnabled(enabled)
+            _state.update {
+                it.copy(
+                    actionMessage = if (enabled)
+                        "Tryb offline włączony — dane z lokalnej bazy"
+                    else
+                        "Tryb offline wyłączony"
+                )
+            }
+        }
+    }
 
     init {
         viewModelScope.launch {
