@@ -294,8 +294,8 @@ class StepwiseViewModel @Inject constructor(
     val queueEvents: Flow<String> = _queueEvents.receiveAsFlow()
 
     /**
-     * Dodaje utwór do kolejki. Online: lokalna kolejka + Spotify Web API.
-     * Offline: tylko lokalna kolejka. Wynik raportowany snackbarem.
+     * Dodaje pojedynczy utwór do kolejki. Online: lokalna kolejka + Spotify
+     * Web API. Offline: tylko lokalna kolejka. Wynik raportowany snackbarem.
      */
     fun addToQueue(track: Track) {
         viewModelScope.launch {
@@ -310,6 +310,45 @@ class StepwiseViewModel @Inject constructor(
             }
             _queueEvents.send(msg)
         }
+    }
+
+    /**
+     * Bulk: dodaje całą bieżącą sesję do kolejki Spotify w kolejności, w jakiej
+     * jest zbudowana. Pomija ewentualne błędy pojedynczych wywołań (zlicza tylko
+     * zliczeniem sukcesów). Wynik (np. "Dodano 12 z 14 utworów do kolejki")
+     * trafia snackbarem.
+     */
+    fun addSessionToQueue() {
+        val tracks = _state.value.sessionTracks.map { it.track }
+        if (tracks.isEmpty()) return
+        viewModelScope.launch {
+            var ok = 0
+            var savedOffline = 0
+            var failed = 0
+            tracks.forEach { t ->
+                when (queueRepository.addToQueue(t)) {
+                    AddToQueueResult.Success -> ok++
+                    AddToQueueResult.SavedOffline -> savedOffline++
+                    is AddToQueueResult.SavedRemoteFailed -> failed++
+                }
+            }
+            val total = tracks.size
+            val msg = when {
+                savedOffline == total ->
+                    "Tryb offline — zapisano $savedOffline ${pluralUtworow(savedOffline)} lokalnie."
+                failed == 0 ->
+                    "Dodano $ok ${pluralUtworow(ok)} do kolejki Spotify."
+                else ->
+                    "Dodano $ok z $total — reszta zapisana tylko lokalnie."
+            }
+            _queueEvents.send(msg)
+        }
+    }
+
+    private fun pluralUtworow(n: Int): String = when {
+        n == 1 -> "utwór"
+        n % 10 in 2..4 && (n % 100 < 10 || n % 100 >= 20) -> "utwory"
+        else -> "utworów"
     }
 
     init {

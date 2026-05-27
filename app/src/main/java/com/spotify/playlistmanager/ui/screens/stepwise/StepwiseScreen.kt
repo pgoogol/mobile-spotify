@@ -205,8 +205,10 @@ fun StepwiseScreen(
                 availablePlaylists = state.availablePlaylists,
                 appendMode = state.appendMode,
                 isLoadingAnchors = state.isLoadingAppendAnchors,
+                sessionTrackCount = state.sessionTracks.size,
                 onEnable = viewModel::onEnableAppendMode,
-                onDisable = viewModel::onDisableAppendMode
+                onDisable = viewModel::onDisableAppendMode,
+                onAddSessionToQueue = viewModel::addSessionToQueue
             )
 
             PoolSelectorsSection(
@@ -265,8 +267,7 @@ fun StepwiseScreen(
                 onUndoLast = viewModel::onUndoLast,
                 onClear = viewModel::onClearSession,
                 onAddFromAnyPlaylist = viewModel::onOpenManualTrackPicker,
-                onShowDetail = viewModel::onShowTrackDetail,
-                onQueueTrack = viewModel::addToQueue
+                onShowDetail = viewModel::onShowTrackDetail
             )
 
             state.autoFillSnapshot?.let { snapshot ->
@@ -305,8 +306,7 @@ fun StepwiseScreen(
                     isAutoFilling = state.isAutoFilling,
                     onPick = viewModel::onPickCandidate,
                     onAutoFill = viewModel::onAutoFillBlock,
-                    onShowDetail = viewModel::onShowTrackDetail,
-                    onQueueTrack = viewModel::addToQueue
+                    onShowDetail = viewModel::onShowTrackDetail
                 )
 
                 AdvancedWeightsSection(
@@ -415,8 +415,10 @@ private fun AppendModeSection(
     availablePlaylists: List<Playlist>,
     appendMode: AppendMode?,
     isLoadingAnchors: Boolean,
+    sessionTrackCount: Int,
     onEnable: (Playlist) -> Unit,
-    onDisable: () -> Unit
+    onDisable: () -> Unit,
+    onAddSessionToQueue: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -436,6 +438,29 @@ private fun AppendModeSection(
                 onClick = { expanded = true },
                 label = { Text("Dokończ istniejącą") },
                 modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onAddSessionToQueue,
+            enabled = sessionTrackCount > 0,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.QueueMusic,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (sessionTrackCount > 0)
+                    "Dodaj do kolejki ($sessionTrackCount)"
+                else
+                    "Dodaj do kolejki",
+                fontWeight = FontWeight.SemiBold
             )
         }
 
@@ -1044,8 +1069,7 @@ private fun SessionTracksSection(
     onUndoLast: () -> Unit,
     onClear: () -> Unit,
     onAddFromAnyPlaylist: () -> Unit,
-    onShowDetail: (Track) -> Unit,
-    onQueueTrack: (Track) -> Unit
+    onShowDetail: (Track) -> Unit
 ) {
     val anchorCount = tracks.count { it.isAnchor }
     val newCount = tracks.size - anchorCount
@@ -1090,8 +1114,7 @@ private fun SessionTracksSection(
                     SessionTrackRow(
                         number = newNumber,
                         sessionTrack = sessionTrack,
-                        onClick = { onShowDetail(sessionTrack.track) },
-                        onQueue = { onQueueTrack(sessionTrack.track) }
+                        onClick = { onShowDetail(sessionTrack.track) }
                     )
                 }
             }
@@ -1133,8 +1156,7 @@ private fun SessionTracksSection(
 private fun SessionTrackRow(
     number: Int,
     sessionTrack: SessionTrack,
-    onClick: () -> Unit,
-    onQueue: () -> Unit
+    onClick: () -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1209,17 +1231,6 @@ private fun SessionTrackRow(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
-        }
-        IconButton(
-            onClick = onQueue,
-            modifier = Modifier.size(28.dp)
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.QueueMusic,
-                contentDescription = "Dodaj do kolejki",
-                tint = SpotifyGreen,
-                modifier = Modifier.size(16.dp)
-            )
         }
     }
 }
@@ -1443,8 +1454,7 @@ private fun CandidatesSection(
     isAutoFilling: Boolean,
     onPick: (SuggestNextTrackUseCase.Candidate) -> Unit,
     onAutoFill: () -> Unit,
-    onShowDetail: (Track) -> Unit,
-    onQueueTrack: (Track) -> Unit
+    onShowDetail: (Track) -> Unit
 ) {
     SectionCard(title = "Sugestie") {
         when {
@@ -1465,8 +1475,7 @@ private fun CandidatesSection(
                         rank = idx + 1,
                         candidate = candidate,
                         onClick = { onPick(candidate) },
-                        onShowDetail = { onShowDetail(candidate.track) },
-                        onQueue = { onQueueTrack(candidate.track) }
+                        onShowDetail = { onShowDetail(candidate.track) }
                     )
                 }
             }
@@ -1509,8 +1518,7 @@ private fun CandidateRow(
     rank: Int,
     candidate: SuggestNextTrackUseCase.Candidate,
     onClick: () -> Unit,
-    onShowDetail: () -> Unit,
-    onQueue: () -> Unit
+    onShowDetail: () -> Unit
 ) {
     val compatChip = when {
         candidate.harmonicCompat >= 0.85f -> "\u2705"
@@ -1606,21 +1614,10 @@ private fun CandidateRow(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(
-                    onClick = onQueue,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.QueueMusic,
-                        contentDescription = "Dodaj do kolejki",
-                        tint = SpotifyGreen,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
                 Spacer(Modifier.width(4.dp))
                 Icon(
                     Icons.Filled.MusicNote,
-                    contentDescription = "Dodaj do sesji",
+                    contentDescription = "Dodaj",
                     tint = SpotifyGreen,
                     modifier = Modifier.size(20.dp)
                 )
