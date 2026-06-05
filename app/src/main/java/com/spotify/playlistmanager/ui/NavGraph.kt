@@ -27,7 +27,6 @@ import com.spotify.playlistmanager.ui.screens.generate.GenerateViewModel
 import com.spotify.playlistmanager.ui.screens.login.LoginScreen
 import com.spotify.playlistmanager.ui.screens.playlists.PlaylistsScreen
 import com.spotify.playlistmanager.ui.screens.profile.ProfileScreen
-import com.spotify.playlistmanager.ui.screens.queue.QueueScreen
 import com.spotify.playlistmanager.ui.screens.settings.SettingsScreen
 import com.spotify.playlistmanager.ui.screens.stepwise.StepwiseScreen
 import com.spotify.playlistmanager.ui.screens.templates.TemplatesScreen
@@ -55,7 +54,6 @@ sealed class Screen(val route: String) {
     data object Settings : Screen("settings")
     data object Profile : Screen("profile")
     data object CsvImport : Screen("csv_import")
-    data object Queue : Screen("queue")
 }
 
 // ── Zakładki dolnej nawigacji ────────────────────────────────────────────────
@@ -169,13 +167,8 @@ fun AppNavGraph(
                     navController.navigate(Screen.Tracks.createRoute(id, name))
                 },
                 onGenerateClick = { navController.navigate(Screen.Generate.route) },
-                onQueueClick = { navController.navigate(Screen.Queue.route) },
                 onSettingsClick = { navController.navigate(Screen.Settings.route) }
             )
-        }
-
-        composable(Screen.Queue.route) {
-            QueueScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.Tracks.route) { back ->

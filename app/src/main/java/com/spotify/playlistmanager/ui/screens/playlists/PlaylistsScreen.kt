@@ -39,7 +39,6 @@ import com.spotify.playlistmanager.ui.theme.SpotifyMidGray
 fun PlaylistsScreen(
     onPlaylistClick: (id: String, name: String) -> Unit,
     onGenerateClick: () -> Unit,
-    onQueueClick:    () -> Unit,
     onSettingsClick: () -> Unit,
     viewModel:       PlaylistsViewModel = hiltViewModel()
 ) {
@@ -61,13 +60,6 @@ fun PlaylistsScreen(
                             imageVector = if (viewMode == ViewMode.LIST)
                                 Icons.Default.GridView else Icons.AutoMirrored.Filled.ViewList,
                             contentDescription = "Zmień widok"
-                        )
-                    }
-                    IconButton(onClick = onQueueClick) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.QueueMusic,
-                            contentDescription = "Kolejka",
-                            tint = SpotifyGreen
                         )
                     }
                     IconButton(onClick = onGenerateClick) {
