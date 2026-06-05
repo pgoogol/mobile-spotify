@@ -286,7 +286,7 @@ class SpotifyRepository @Inject constructor(
             id = user.id,
             displayName = user.display_name,
             email = user.email,
-            imageUrl = user.images.firstOrNull()?.url,
+            imageUrl = user.images?.firstOrNull()?.url,
             country = user.country,
             followers = user.followers?.total ?: 0
         )
@@ -298,8 +298,8 @@ class SpotifyRepository @Inject constructor(
                 TopArtist(
                     id = artist.id,
                     name = artist.name,
-                    imageUrl = artist.images.firstOrNull()?.url,
-                    genres = artist.genres,
+                    imageUrl = artist.images?.firstOrNull()?.url,
+                    genres = artist.genres.orEmpty(),
                     popularity = artist.popularity
                 )
             }
@@ -357,7 +357,7 @@ private fun SpotifyPlaylist.toDomain() = Playlist(
     id = id,
     name = name,
     description = description,
-    imageUrl = images.firstOrNull()?.url,
+    imageUrl = images?.firstOrNull()?.url,
     trackCount = tracks.total,
     ownerId = owner.id,
     snapshotId = snapshot_id
@@ -366,9 +366,9 @@ private fun SpotifyPlaylist.toDomain() = Playlist(
 private fun SpotifyTrack.toDomain() = Track(
     id = id,
     title = name,
-    artist = artists.joinToString(", ") { it.name },
+    artist = artists?.joinToString(", ") { it.name } ?: "",
     album = album.name,
-    albumArtUrl = album.images.firstOrNull()?.url,
+    albumArtUrl = album.images?.firstOrNull()?.url,
     durationMs = duration_ms,
     popularity = popularity,
     uri = uri,
