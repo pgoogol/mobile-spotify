@@ -477,13 +477,13 @@ class StepwiseViewModel @Inject constructor(
                         originalTrackCount = tracks.size
                     ),
                     sessionTracks = anchors,
-                    poolA = PoolSlot(playlist = playlist, tracks = tracks, featuresLoaded = true),
                     isLoadingAppendAnchors = false,
                     currentAxis = anchors.lastOrNull()?.axis ?: ScoreAxis.DANCE
                 )
             }
 
-            // Features dla poolA już pobrane
+            // Pule zostaja nietkniete — uzytkownik wybiera samodzielnie skad
+            // czerpac nowe utwory (typowo INNA playlista niz ta dopisywana).
             recomputeCandidates()
         }
     }
@@ -1090,8 +1090,26 @@ class StepwiseViewModel @Inject constructor(
                 }
             }.onSuccess { playlistId ->
                 val url = "https://open.spotify.com/playlist/$playlistId"
-                _state.update {
-                    it.copy(saveState = SaveState.Success(url, uris.size))
+                _state.update { current ->
+                    val append = current.appendMode
+                    if (append != null) {
+                        // Po dopisaniu: nowo zapisane tracki staja sie kotwicami,
+                        // zeby kolejny save w tej samej sesji nie wyslal ich
+                        // ponownie (zapobiega duplikatom w playliscie).
+                        // Podbijamy tez originalTrackCount, by UI w sekcji Tryb
+                        // pokazywal aktualny stan playlisty.
+                        current.copy(
+                            saveState = SaveState.Success(url, uris.size),
+                            sessionTracks = current.sessionTracks.map {
+                                if (it.isAnchor) it else it.copy(isAnchor = true)
+                            },
+                            appendMode = append.copy(
+                                originalTrackCount = append.originalTrackCount + uris.size
+                            )
+                        )
+                    } else {
+                        current.copy(saveState = SaveState.Success(url, uris.size))
+                    }
                 }
             }.onFailure { e ->
                 _state.update {
