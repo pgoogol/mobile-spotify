@@ -23,9 +23,7 @@ private val Context.offlineDataStore: DataStore<Preferences> by preferencesDataS
  * Singleton zarządzający globalną flagą "tryb offline".
  *
  * Gdy włączony, wszystkie odczyty z repozytorium są przekierowywane do
- * CachePolicy.CACHE_ONLY (zero requestów do Spotify Web API). Zapisy
- * realizowane przez QueueRepository same w sobie sprawdzają flagę i
- * przy włączonym offline zapisują wyłącznie do lokalnego Room.
+ * CachePolicy.CACHE_ONLY (zero requestów do Spotify Web API).
  *
  * Konwencja analogiczna do TokenManager:
  *  - reaktywny StateFlow (isEnabled) dla UI,

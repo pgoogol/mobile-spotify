@@ -12,8 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TemplateSourceEntity::class,
         PlaylistEntity::class,
         TrackEntity::class,
-        PlaylistTrackCrossRef::class,
-        QueueEntity::class
+        PlaylistTrackCrossRef::class
     ],
     version  = 5,
     exportSchema = false
@@ -22,7 +21,6 @@ abstract class TrackFeaturesDatabase : RoomDatabase() {
     abstract fun trackFeaturesDao(): TrackFeaturesDao
     abstract fun generatorTemplateDao(): GeneratorTemplateDao
     abstract fun playlistCacheDao(): PlaylistCacheDao
-    abstract fun queueDao(): QueueDao
 
     companion object {
         /**

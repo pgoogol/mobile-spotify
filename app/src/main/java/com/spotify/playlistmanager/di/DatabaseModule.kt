@@ -7,18 +7,15 @@ import com.spotify.playlistmanager.data.cache.CoilImageCacheCleaner
 import com.spotify.playlistmanager.data.cache.CoilImagePreloader
 import com.spotify.playlistmanager.data.cache.GeneratorTemplateDao
 import com.spotify.playlistmanager.data.cache.PlaylistCacheDao
-import com.spotify.playlistmanager.data.cache.QueueDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDao
 import com.spotify.playlistmanager.data.cache.TrackFeaturesDatabase
 import com.spotify.playlistmanager.data.repository.GeneratorTemplateRepository
 import com.spotify.playlistmanager.data.repository.PlaylistCacheRepository
-import com.spotify.playlistmanager.data.repository.QueueRepository
 import com.spotify.playlistmanager.data.repository.TrackFeaturesRepository
 import com.spotify.playlistmanager.domain.cache.IImageCacheCleaner
 import com.spotify.playlistmanager.domain.cache.IImagePreloader
 import com.spotify.playlistmanager.domain.repository.IGeneratorTemplateRepository
 import com.spotify.playlistmanager.domain.repository.IPlaylistCacheRepository
-import com.spotify.playlistmanager.domain.repository.IQueueRepository
 import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
 import dagger.Binds
 import dagger.Module
@@ -58,11 +55,6 @@ object DatabaseModule {
     @Singleton
     fun providePlaylistCacheDao(db: TrackFeaturesDatabase): PlaylistCacheDao =
         db.playlistCacheDao()
-
-    @Provides
-    @Singleton
-    fun provideQueueDao(db: TrackFeaturesDatabase): QueueDao =
-        db.queueDao()
 }
 
 @Module
@@ -86,12 +78,6 @@ abstract class DatabaseBindings {
     abstract fun bindPlaylistCacheRepository(
         impl: PlaylistCacheRepository
     ): IPlaylistCacheRepository
-
-    @Binds
-    @Singleton
-    abstract fun bindQueueRepository(
-        impl: QueueRepository
-    ): IQueueRepository
 
     @ExperimentalCoilApi
     @Binds

@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
@@ -136,13 +135,6 @@ fun StepwiseScreen(
         }
     }
 
-    // Snackbar po dodaniu utworu do kolejki
-    LaunchedEffect(viewModel) {
-        viewModel.queueEvents.collect { msg ->
-            snackbarHostState.showSnackbar(msg)
-        }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -205,10 +197,8 @@ fun StepwiseScreen(
                 availablePlaylists = state.availablePlaylists,
                 appendMode = state.appendMode,
                 isLoadingAnchors = state.isLoadingAppendAnchors,
-                sessionTrackCount = state.sessionTracks.size,
                 onEnable = viewModel::onEnableAppendMode,
-                onDisable = viewModel::onDisableAppendMode,
-                onAddSessionToQueue = viewModel::addSessionToQueue
+                onDisable = viewModel::onDisableAppendMode
             )
 
             PoolSelectorsSection(
@@ -415,10 +405,8 @@ private fun AppendModeSection(
     availablePlaylists: List<Playlist>,
     appendMode: AppendMode?,
     isLoadingAnchors: Boolean,
-    sessionTrackCount: Int,
     onEnable: (Playlist) -> Unit,
-    onDisable: () -> Unit,
-    onAddSessionToQueue: () -> Unit
+    onDisable: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -438,29 +426,6 @@ private fun AppendModeSection(
                 onClick = { expanded = true },
                 label = { Text("Dokończ istniejącą") },
                 modifier = Modifier.weight(1f)
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = onAddSessionToQueue,
-            enabled = sessionTrackCount > 0,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen),
-            shape = RoundedCornerShape(10.dp)
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.QueueMusic,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (sessionTrackCount > 0)
-                    "Dodaj do kolejki ($sessionTrackCount)"
-                else
-                    "Dodaj do kolejki",
-                fontWeight = FontWeight.SemiBold
             )
         }
 
