@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackEntity::class,
         PlaylistTrackCrossRef::class
     ],
-    version  = 4,
+    version  = 6,
     exportSchema = false
 )
 abstract class TrackFeaturesDatabase : RoomDatabase() {
@@ -137,6 +137,43 @@ abstract class TrackFeaturesDatabase : RoomDatabase() {
                 db.execSQL(
                     "ALTER TABLE template_sources ADD COLUMN pinned_tracks_json TEXT"
                 )
+            }
+        }
+
+        /**
+         * Migracja addytywna v4→v5.
+         * Dodaje tabelę queue_entries dla lokalnej kolejki odtwarzania.
+         * Tabela jest świadomie zdenormalizowana — przetrwa wyczyszczenie
+         * tracks_cache (clearAll) i działa również w trybie offline.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS queue_entries (
+                        id            INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        track_id      TEXT    NOT NULL,
+                        added_at      INTEGER NOT NULL,
+                        title         TEXT    NOT NULL,
+                        artist        TEXT    NOT NULL,
+                        album         TEXT    NOT NULL,
+                        album_art_url TEXT,
+                        duration_ms   INTEGER NOT NULL,
+                        uri           TEXT
+                    )
+                """.trimIndent())
+            }
+        }
+
+        /**
+         * Migracja v5→v6.
+         * Usuwa tabelę queue_entries — funkcja lokalnej kolejki została
+         * wycofana. Tabela mogła powstać u userów, którzy zdążyli zmigrować
+         * do v5 (MIGRATION_4_5); DROP IF EXISTS jest bezpieczny też gdy jej
+         * nie ma. Reszta schematu bez zmian.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS queue_entries")
             }
         }
     }

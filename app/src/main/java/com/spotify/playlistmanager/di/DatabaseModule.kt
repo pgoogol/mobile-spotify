@@ -36,7 +36,9 @@ object DatabaseModule {
             .addMigrations(
                 TrackFeaturesDatabase.MIGRATION_1_2,
                 TrackFeaturesDatabase.MIGRATION_2_3,
-                TrackFeaturesDatabase.MIGRATION_3_4
+                TrackFeaturesDatabase.MIGRATION_3_4,
+                TrackFeaturesDatabase.MIGRATION_4_5,
+                TrackFeaturesDatabase.MIGRATION_5_6
             )
             .build()
 

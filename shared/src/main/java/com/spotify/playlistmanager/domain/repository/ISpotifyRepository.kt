@@ -36,6 +36,16 @@ interface ISpotifyRepository {
     suspend fun createPlaylist(name: String, description: String = ""): String
     suspend fun addTracksToPlaylist(playlistId: String, uris: List<String>)
 
+    /**
+     * Zastępuje całą zawartość playlisty podaną listą URI (idempotentnie).
+     * Implementacja obsługuje >100 utworów dzięki dzieleniu na chunki:
+     * pierwszy chunk idzie PUT-em (replace), kolejne POST-em (append).
+     *
+     * Default no-op służy backward-compat dla fake'ów w testach;
+     * produkcyjne SpotifyRepository nadpisuje.
+     */
+    suspend fun replacePlaylistTracks(playlistId: String, uris: List<String>) {}
+
     // ── User profile ──────────────────────────────────────────────────────
 
     suspend fun fetchAndCacheCurrentUser(): SpotifyUser

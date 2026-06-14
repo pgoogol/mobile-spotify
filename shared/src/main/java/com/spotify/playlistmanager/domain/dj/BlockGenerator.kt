@@ -12,7 +12,7 @@ import com.spotify.playlistmanager.domain.dj.model.Substyle
 import kotlin.math.abs
 
 /**
- * Rdzeń algorytmu — buduje pojedynczy blok 3–10 utworów zachłannie,
+ * Rdzeń algorytmu — buduje pojedynczy blok 1–10 utworów zachłannie,
  * slot po slocie, minimalizując funkcję kosztu (spec sekcja 8).
  *
  * Pula = `state.poolIdsByStyle[style]` zmapowana na `AnalyzedTrack`y
@@ -38,7 +38,7 @@ class BlockGenerator {
      * @param state aktualny PartyState (do filtrowania played/queue + kontekst kosztu)
      * @param profile profil docelowego stylu
      * @param analyzedPool wszystkie przeanalizowane utwory tego stylu
-     * @param n długość bloku 3..10
+     * @param n długość bloku 1..10 (tanda może mieć mniej niż 3 utwory)
      * @param shape kształt energii
      * @param startAnchor null = Planning, !=null = Live (kotwiczenie startu)
      * @param filters dodatkowe filtry (z presetu / UI)
@@ -56,7 +56,7 @@ class BlockGenerator {
         weights: CostWeights = if (state.mode == PartyMode.LIVE) CostWeights.LIVE else CostWeights.PLANNING,
         idHint: String = System.currentTimeMillis().toString()
     ): Result<Block> {
-        require(n in 3..10) { "Rozmiar bloku N musi być w [3..10], jest $n" }
+        require(n in 1..10) { "Rozmiar bloku N musi być w [1..10], jest $n" }
 
         // Wstępne filtrowanie puli — bramka, played, queueTail, filtry presetu
         val available = analyzedPool

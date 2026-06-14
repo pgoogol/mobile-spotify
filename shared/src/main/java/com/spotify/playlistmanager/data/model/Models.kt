@@ -18,7 +18,7 @@ data class SpotifyPlaylist(
     val id: String,
     val name: String,
     val description: String?,
-    val images: List<SpotifyImage>,
+    val images: List<SpotifyImage>?,
     val tracks: TracksRef,
     val owner: SpotifyOwner,
     val public: Boolean?,
@@ -48,7 +48,7 @@ data class PlaylistTrackItem(
 data class SpotifyTrack(
     val id: String?,
     val name: String,
-    val artists: List<SpotifyArtist>,
+    val artists: List<SpotifyArtist>?,
     val album: SpotifyAlbum,
     val duration_ms: Int,
     val popularity: Int,
@@ -61,7 +61,7 @@ data class SpotifyArtist(val id: String, val name: String)
 data class SpotifyAlbum(
     val id: String,
     val name: String,
-    val images: List<SpotifyImage>,
+    val images: List<SpotifyImage>?,
     val release_date: String?
 )
 
@@ -69,7 +69,7 @@ data class SpotifyUser(
     val id: String,
     val display_name: String?,
     val email: String?,
-    val images: List<SpotifyImage>,
+    val images: List<SpotifyImage>?,
     val country: String? = null,
     val followers: FollowersRef? = null
 )
@@ -99,10 +99,10 @@ data class TopArtistsResponse(
 data class SpotifyArtistFull(
     val id: String,
     val name: String,
-    val images: List<SpotifyImage>,
-    val genres: List<String>,
+    val images: List<SpotifyImage>?,
+    val genres: List<String>?,
     val popularity: Int,
-    val followers: FollowersRef
+    val followers: FollowersRef? = null
 )
 
 data class FollowersRef(val total: Int)
