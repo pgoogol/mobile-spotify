@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackEntity::class,
         PlaylistTrackCrossRef::class
     ],
-    version  = 5,
+    version  = 6,
     exportSchema = false
 )
 abstract class TrackFeaturesDatabase : RoomDatabase() {
@@ -161,6 +161,19 @@ abstract class TrackFeaturesDatabase : RoomDatabase() {
                         uri           TEXT
                     )
                 """.trimIndent())
+            }
+        }
+
+        /**
+         * Migracja v5→v6.
+         * Usuwa tabelę queue_entries — funkcja lokalnej kolejki została
+         * wycofana. Tabela mogła powstać u userów, którzy zdążyli zmigrować
+         * do v5 (MIGRATION_4_5); DROP IF EXISTS jest bezpieczny też gdy jej
+         * nie ma. Reszta schematu bez zmian.
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS queue_entries")
             }
         }
     }
