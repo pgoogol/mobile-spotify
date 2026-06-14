@@ -1217,10 +1217,12 @@ class StepwiseViewModel @Inject constructor(
             }
 
             val tanda = s.tandaStructure
+            // Respektuj rozmiar tandy nawet gdy < 3 (np. 2:3). Tylko brak
+            // struktury → domyslny rozmiar bloku. Gorny limit 10 zostaje.
             val n = (
                 if (tanda != null) (if (activeStyle == Style.SALSA) tanda.countA else tanda.countB)
                 else PartyPlanner.DEFAULT_BLOCK_SIZE
-            ).coerceIn(3, 10)
+            ).coerceIn(1, 10)
 
             val lastForStyle = s.sessionTracks.lastOrNull {
                 it.pool == s.activePool
