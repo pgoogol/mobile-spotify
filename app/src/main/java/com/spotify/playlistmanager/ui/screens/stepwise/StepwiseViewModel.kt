@@ -157,6 +157,36 @@ sealed class SaveState {
 }
 
 /**
+ * Stan wymiany pojedynczego utworu w sesji (tryb Live bloki).
+ * Idle → (Loading | Picking | Error). [Loading] i [Picking] trzymają indeks
+ * utworu w `sessionTracks`, którego dotyczy operacja.
+ */
+sealed class SwapState {
+    data object Idle : SwapState()
+
+    /** Auto-wymiana w toku dla danego indeksu. */
+    data class Loading(val sessionIndex: Int) : SwapState()
+
+    /** Picker — lista kandydatów z puli do ręcznego wyboru. */
+    data class Picking(
+        val sessionIndex: Int,
+        val original: SessionTrack,
+        val candidates: List<SuggestNextTrackUseCase.Candidate>
+    ) : SwapState()
+
+    data class Error(val message: String) : SwapState()
+}
+
+/** Snapshot do cofnięcia ostatniej wymiany (akcja „Cofnij" w snackbarze). */
+data class SwapSnapshot(
+    val sessionIndex: Int,
+    val replaced: SessionTrack,
+    val insertedTitle: String,
+    /** Wartość `appendAnchorsDirty` sprzed wymiany — przywracana przy undo. */
+    val anchorsDirtyBefore: Boolean
+)
+
+/**
  * Stan pełnego ekranu „Krok po kroku".
  */
 data class StepwiseUiState(
@@ -202,9 +232,19 @@ data class StepwiseUiState(
     /** null = tryb „nowa playlista"; non-null = dopisujemy do istniejącej. */
     val appendMode: AppendMode? = null,
     val isLoadingAppendAnchors: Boolean = false,
+    /**
+     * True, gdy w trybie append podmieniono co najmniej jedną „kotwicę"
+     * (utwór już zapisany na playliście). Wymusza nadpisanie całej playlisty
+     * (replacePlaylistTracks) przy zapisie zamiast samego dopisania nowych.
+     */
+    val appendAnchorsDirty: Boolean = false,
 
     // ── Ręczny pick z dowolnej playlisty (duplikaty dozwolone) ─
     val manualTrackPicker: ManualTrackPicker? = null,
+
+    // ── Wymiana pojedynczego utworu w sesji (auto + ręczny picker) ─
+    val swapState: SwapState = SwapState.Idle,
+    val lastSwap: SwapSnapshot? = null,
 
     // ── Podgląd informacji o utworze (bottom sheet) ────────
     val trackDetailSheet: TrackDetailSheet? = null,
@@ -244,7 +284,8 @@ data class StepwiseUiState(
         get() = sessionTracks.filter { !it.isAnchor }
 
     val canSave: Boolean
-        get() = newSessionTracks.isNotEmpty() && saveState !is SaveState.Saving
+        get() = (newSessionTracks.isNotEmpty() || (appendMode != null && appendAnchorsDirty)) &&
+                saveState !is SaveState.Saving
 
     val hasPoolB: Boolean
         get() = poolB != null
@@ -363,7 +404,8 @@ class StepwiseViewModel @Inject constructor(
                     error = null,
                     sessionTracks = emptyList(),
                     tandaCounter = TandaCounter(),
-                    autoFillSnapshot = null
+                    autoFillSnapshot = null,
+                    appendAnchorsDirty = false
                 )
             }
             val tracks = runCatching {
@@ -426,7 +468,8 @@ class StepwiseViewModel @Inject constructor(
                 appendMode = null,
                 sessionTracks = current.sessionTracks.filter { !it.isAnchor },
                 tandaCounter = TandaCounter(),
-                autoFillSnapshot = null
+                autoFillSnapshot = null,
+                appendAnchorsDirty = false
             )
         }
         recomputeCandidates()
@@ -921,6 +964,183 @@ class StepwiseViewModel @Inject constructor(
         }
     }
 
+    // ── Wymiana pojedynczego utworu w sesji (auto + ręczny) ─────────────
+    //
+    // Działa dla KAŻDEGO utworu sesji — także „kotwic" (utworów już zapisanych
+    // na docelowej playliście w trybie append). Podmiana kotwicy ustawia
+    // [StepwiseUiState.appendAnchorsDirty], przez co zapis nadpisuje całą
+    // playlistę (replacePlaylistTracks) zamiast tylko dopisać nowe utwory.
+    //
+    // Kandydaci pochodzą z puli zgodnej z `pool` wymienianego utworu (A→poolA,
+    // B→poolB) i są dobierani tym samym silnikiem co tryb krok-po-kroku:
+    // cel = poziom energii slotu (targetScore/axis), z premią za harmonię i
+    // płynność BPM względem poprzedniego utworu w sesji.
+
+    /** Auto-wymiana: podmienia utwór na najlepszego kandydata z puli. */
+    fun onSwapAuto(sessionIndex: Int) {
+        val s = _state.value
+        s.sessionTracks.getOrNull(sessionIndex) ?: return
+        _state.update { it.copy(swapState = SwapState.Loading(sessionIndex), lastSwap = null) }
+        viewModelScope.launch {
+            val candidates = findSwapCandidates(s, sessionIndex, k = 1).getOrElse { e ->
+                _state.update {
+                    it.copy(swapState = SwapState.Error(e.message ?: "Błąd wyszukiwania zamiennika"))
+                }
+                return@launch
+            }
+            val best = candidates.firstOrNull()
+            if (best == null) {
+                _state.update {
+                    it.copy(swapState = SwapState.Error("Brak innych utworów w puli do wymiany"))
+                }
+                return@launch
+            }
+            applySwap(sessionIndex, best)
+            _state.update { it.copy(swapState = SwapState.Idle) }
+        }
+    }
+
+    /** Ręczny wybór: otwiera picker z listą kandydatów z puli. */
+    fun onSwapPick(sessionIndex: Int) {
+        val s = _state.value
+        val original = s.sessionTracks.getOrNull(sessionIndex) ?: return
+        _state.update { it.copy(swapState = SwapState.Loading(sessionIndex), lastSwap = null) }
+        viewModelScope.launch {
+            val candidates = findSwapCandidates(s, sessionIndex, k = SWAP_PICKER_K).getOrElse { e ->
+                _state.update {
+                    it.copy(swapState = SwapState.Error(e.message ?: "Błąd wyszukiwania zamiennika"))
+                }
+                return@launch
+            }
+            if (candidates.isEmpty()) {
+                _state.update {
+                    it.copy(swapState = SwapState.Error("Brak innych utworów w puli do wymiany"))
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    swapState = SwapState.Picking(
+                        sessionIndex = sessionIndex,
+                        original = original,
+                        candidates = candidates
+                    )
+                )
+            }
+        }
+    }
+
+    /** Potwierdzenie wyboru kandydata z pickera. */
+    fun onConfirmSwap(candidate: SuggestNextTrackUseCase.Candidate) {
+        val picking = _state.value.swapState as? SwapState.Picking ?: return
+        viewModelScope.launch {
+            applySwap(picking.sessionIndex, candidate)
+            _state.update { it.copy(swapState = SwapState.Idle) }
+        }
+    }
+
+    /** Zamknięcie pickera / wyczyszczenie błędu bez zmian. */
+    fun onCancelSwap() {
+        _state.update { it.copy(swapState = SwapState.Idle) }
+    }
+
+    /** Cofa ostatnią wymianę (akcja „Cofnij" w snackbarze). */
+    fun onUndoSwap() {
+        _state.update { current ->
+            val snap = current.lastSwap ?: return@update current
+            val list = current.sessionTracks.toMutableList()
+            if (snap.sessionIndex !in list.indices) return@update current.copy(lastSwap = null)
+            list[snap.sessionIndex] = snap.replaced
+            current.copy(
+                sessionTracks = list,
+                appendAnchorsDirty = snap.anchorsDirtyBefore,
+                lastSwap = null
+            )
+        }
+    }
+
+    fun onClearLastSwap() {
+        if (_state.value.lastSwap != null) {
+            _state.update { it.copy(lastSwap = null) }
+        }
+    }
+
+    /**
+     * Dobiera kandydatów na zamiennik dla utworu sesji o indeksie [sessionIndex].
+     * Pula = źródło zgodne z `pool` wymienianego utworu. Wyklucza wszystkie
+     * utwory już obecne w sesji (w tym wymieniany — brak self-swap i duplikatów).
+     */
+    private suspend fun findSwapCandidates(
+        state: StepwiseUiState,
+        sessionIndex: Int,
+        k: Int
+    ): Result<List<SuggestNextTrackUseCase.Candidate>> {
+        val original = state.sessionTracks.getOrNull(sessionIndex)
+            ?: return Result.failure(IllegalStateException("Utwór poza zakresem"))
+        val poolSlot = if (original.pool == ActivePool.A) state.poolA else state.poolB
+        val pool = poolSlot?.tracks.orEmpty()
+        if (pool.isEmpty()) {
+            return Result.failure(
+                IllegalStateException(
+                    "Pula ${original.pool.name} jest pusta — wybierz playlistę źródłową"
+                )
+            )
+        }
+        val previous = state.sessionTracks.getOrNull(sessionIndex - 1)?.track
+        val excludeIds = state.sessionTracks.mapNotNull { it.track.id }.toSet()
+        val suggestion = suggestUseCase.suggest(
+            pool = pool,
+            alreadyPickedIds = excludeIds,
+            lastPickedTrack = previous,
+            target = NextTrackTarget.Absolute(original.targetScore, original.axis),
+            currentAxis = original.axis,
+            k = k,
+            weights = state.weights
+        )
+        return Result.success(suggestion.candidates)
+    }
+
+    /**
+     * Podmienia utwór sesji [sessionIndex] na [candidate], zachowując parametry
+     * slotu (pool, isAnchor, targetScore). Zapisuje snapshot do undo i — gdy
+     * wymieniono kotwicę — ustawia `appendAnchorsDirty`.
+     */
+    private suspend fun applySwap(
+        sessionIndex: Int,
+        candidate: SuggestNextTrackUseCase.Candidate
+    ) {
+        val features = candidate.track.id?.let { featuresFor(it) }
+        _state.update { current ->
+            val list = current.sessionTracks.toMutableList()
+            val original = list.getOrNull(sessionIndex) ?: return@update current
+            list[sessionIndex] = original.copy(
+                track = candidate.track,
+                score = candidate.score,
+                axis = candidate.scoreAxis,
+                bpm = features?.bpm,
+                camelot = features?.camelot,
+                targetLabel = if (original.isAnchor) "Kotwica (wymieniona)"
+                else "${original.targetLabel} → wymieniony"
+            )
+            current.copy(
+                sessionTracks = list,
+                appendAnchorsDirty = current.appendAnchorsDirty || original.isAnchor,
+                lastSwap = SwapSnapshot(
+                    sessionIndex = sessionIndex,
+                    replaced = original,
+                    insertedTitle = candidate.track.title,
+                    anchorsDirtyBefore = current.appendAnchorsDirty
+                )
+            )
+        }
+    }
+
+    /** Features dla pojedynczego utworu — z cache UI lub doładowane z repo. */
+    private suspend fun featuresFor(trackId: String): TrackAudioFeatures? =
+        lastKnownFeaturesMap[trackId] ?: runCatching {
+            featuresRepository.getFeaturesMap(listOf(trackId))
+        }.getOrNull()?.get(trackId)
+
     // ── Obliczanie kandydatów ───────────────────────────────────────────
 
     private fun recomputeCandidates() {
@@ -992,10 +1212,19 @@ class StepwiseViewModel @Inject constructor(
     fun onSaveAsNewPlaylist() {
         val state = _state.value
         if (!state.canSave) return
-        // Append mode — tylko nowe (kotwice już są na playliście)
-        val tracksToSave = state.newSessionTracks
-        val uris = tracksToSave.mapNotNull { it.track.uri }
-        if (uris.isEmpty()) {
+
+        val append = state.appendMode
+        // Gdy podmieniono kotwicę — nadpisujemy całą playlistę pełną sesją
+        // (kotwice z podmianami + nowe utwory, w kolejności sesji). W innym
+        // wypadku zachowujemy dotychczasowe zachowanie (dopisanie nowych).
+        val rewriteWholePlaylist = append != null && state.appendAnchorsDirty
+        val newUris = state.newSessionTracks.mapNotNull { it.track.uri }
+        val urisToSend = if (rewriteWholePlaylist) {
+            state.sessionTracks.mapNotNull { it.track.uri }
+        } else {
+            newUris
+        }
+        if (urisToSend.isEmpty()) {
             _state.update {
                 it.copy(saveState = SaveState.Error("Żaden utwór nie ma URI Spotify"))
             }
@@ -1005,42 +1234,46 @@ class StepwiseViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(saveState = SaveState.Saving) }
             runCatching {
-                val append = state.appendMode
-                if (append != null) {
-                    // Dopisz do istniejącej playlisty
-                    spotifyRepository.addTracksToPlaylist(append.playlistId, uris)
-                    append.playlistId
-                } else {
-                    // Utwórz nową playlistę
-                    val finalDescription = buildFinalDescription(state)
-                    val playlistId = spotifyRepository.createPlaylist(
-                        name = state.newPlaylistName.ifBlank { "Sesja DJ" },
-                        description = finalDescription
-                    )
-                    spotifyRepository.addTracksToPlaylist(playlistId, uris)
-                    playlistId
+                when {
+                    append != null && rewriteWholePlaylist -> {
+                        // Pełne nadpisanie istniejącej playlisty (PUT + POST chunki)
+                        spotifyRepository.replacePlaylistTracks(append.playlistId, urisToSend)
+                        append.playlistId to urisToSend.size
+                    }
+                    append != null -> {
+                        // Dopisz nowe utwory na koniec istniejącej playlisty
+                        spotifyRepository.addTracksToPlaylist(append.playlistId, urisToSend)
+                        append.playlistId to (append.originalTrackCount + urisToSend.size)
+                    }
+                    else -> {
+                        // Utwórz nową playlistę
+                        val finalDescription = buildFinalDescription(state)
+                        val playlistId = spotifyRepository.createPlaylist(
+                            name = state.newPlaylistName.ifBlank { "Sesja DJ" },
+                            description = finalDescription
+                        )
+                        spotifyRepository.addTracksToPlaylist(playlistId, urisToSend)
+                        playlistId to urisToSend.size
+                    }
                 }
-            }.onSuccess { playlistId ->
+            }.onSuccess { (playlistId, newTotalCount) ->
                 val url = "https://open.spotify.com/playlist/$playlistId"
                 _state.update { current ->
-                    val append = current.appendMode
-                    if (append != null) {
-                        // Po dopisaniu: nowo zapisane tracki staja sie kotwicami,
-                        // zeby kolejny save w tej samej sesji nie wyslal ich
-                        // ponownie (zapobiega duplikatom w playliscie).
-                        // Podbijamy tez originalTrackCount, by UI w sekcji Tryb
-                        // pokazywal aktualny stan playlisty.
+                    val ap = current.appendMode
+                    if (ap != null) {
+                        // Po zapisie: nowo zapisane tracki staja sie kotwicami, zeby
+                        // kolejny save nie wyslal ich ponownie. Kotwice (w tym
+                        // podmienione) sa juz na playliscie — czyscimy dirty.
                         current.copy(
-                            saveState = SaveState.Success(url, uris.size),
+                            saveState = SaveState.Success(url, newUris.size),
                             sessionTracks = current.sessionTracks.map {
                                 if (it.isAnchor) it else it.copy(isAnchor = true)
                             },
-                            appendMode = append.copy(
-                                originalTrackCount = append.originalTrackCount + uris.size
-                            )
+                            appendMode = ap.copy(originalTrackCount = newTotalCount),
+                            appendAnchorsDirty = false
                         )
                     } else {
-                        current.copy(saveState = SaveState.Success(url, uris.size))
+                        current.copy(saveState = SaveState.Success(url, newUris.size))
                     }
                 }
             }.onFailure { e ->
@@ -1088,6 +1321,9 @@ class StepwiseViewModel @Inject constructor(
 
     private companion object {
         const val SPOTIFY_DESCRIPTION_LIMIT = 300
+
+        /** Ilu kandydatów pokazać w pickerze ręcznej wymiany. */
+        const val SWAP_PICKER_K = 12
     }
 
     fun onSaveStateConsumed() {
