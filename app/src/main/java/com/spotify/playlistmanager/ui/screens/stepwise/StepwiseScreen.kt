@@ -1,11 +1,13 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 
 package com.spotify.playlistmanager.ui.screens.stepwise
 
 import android.content.Intent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -61,14 +64,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -132,6 +138,30 @@ fun StepwiseScreen(
         state.error?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.onClearError()
+        }
+    }
+
+    // Błąd wymiany utworu
+    LaunchedEffect(state.swapState) {
+        val sw = state.swapState
+        if (sw is SwapState.Error) {
+            snackbarHostState.showSnackbar(sw.message)
+            viewModel.onCancelSwap()
+        }
+    }
+
+    // Snackbar po wymianie — z akcją „Cofnij"
+    LaunchedEffect(state.lastSwap) {
+        val snap = state.lastSwap ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "Wymieniono na „${snap.insertedTitle}”",
+            actionLabel = "Cofnij",
+            withDismissAction = true,
+            duration = SnackbarDuration.Short
+        )
+        when (result) {
+            SnackbarResult.ActionPerformed -> viewModel.onUndoSwap()
+            SnackbarResult.Dismissed -> viewModel.onClearLastSwap()
         }
     }
 
@@ -254,10 +284,14 @@ fun StepwiseScreen(
 
             SessionTracksSection(
                 tracks = state.sessionTracks,
+                swapEnabled = state.generatorMode == GeneratorMode.LIVE,
+                swapState = state.swapState,
                 onUndoLast = viewModel::onUndoLast,
                 onClear = viewModel::onClearSession,
                 onAddFromAnyPlaylist = viewModel::onOpenManualTrackPicker,
-                onShowDetail = viewModel::onShowTrackDetail
+                onShowDetail = viewModel::onShowTrackDetail,
+                onSwapAuto = viewModel::onSwapAuto,
+                onSwapPick = viewModel::onSwapPick
             )
 
             state.autoFillSnapshot?.let { snapshot ->
@@ -348,6 +382,16 @@ fun StepwiseScreen(
             features = sheet.features,
             sheetState = sheetState,
             onDismiss = viewModel::onCloseTrackDetail
+        )
+    }
+
+    // Picker ręcznej wymiany utworu (lista kandydatów z puli)
+    (state.swapState as? SwapState.Picking)?.let { picking ->
+        SwapPickerSheet(
+            picking = picking,
+            onPick = viewModel::onConfirmSwap,
+            onShowDetail = viewModel::onShowTrackDetail,
+            onDismiss = viewModel::onCancelSwap
         )
     }
 
@@ -1031,10 +1075,14 @@ private fun TandaProgressRow(
 @Composable
 private fun SessionTracksSection(
     tracks: List<SessionTrack>,
+    swapEnabled: Boolean,
+    swapState: SwapState,
     onUndoLast: () -> Unit,
     onClear: () -> Unit,
     onAddFromAnyPlaylist: () -> Unit,
-    onShowDetail: (Track) -> Unit
+    onShowDetail: (Track) -> Unit,
+    onSwapAuto: (Int) -> Unit,
+    onSwapPick: (Int) -> Unit
 ) {
     val anchorCount = tracks.count { it.isAnchor }
     val newCount = tracks.size - anchorCount
@@ -1079,7 +1127,11 @@ private fun SessionTracksSection(
                     SessionTrackRow(
                         number = newNumber,
                         sessionTrack = sessionTrack,
-                        onClick = { onShowDetail(sessionTrack.track) }
+                        swapEnabled = swapEnabled,
+                        isSwapping = (swapState as? SwapState.Loading)?.sessionIndex == index,
+                        onClick = { onShowDetail(sessionTrack.track) },
+                        onSwapAuto = { onSwapAuto(index) },
+                        onSwapPick = { onSwapPick(index) }
                     )
                 }
             }
@@ -1121,7 +1173,11 @@ private fun SessionTracksSection(
 private fun SessionTrackRow(
     number: Int,
     sessionTrack: SessionTrack,
-    onClick: () -> Unit
+    swapEnabled: Boolean,
+    isSwapping: Boolean,
+    onClick: () -> Unit,
+    onSwapAuto: () -> Unit,
+    onSwapPick: () -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1196,6 +1252,119 @@ private fun SessionTrackRow(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
+        }
+        if (swapEnabled) {
+            Spacer(Modifier.width(2.dp))
+            if (isSwapping) {
+                CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    color = SpotifyGreen,
+                    modifier = Modifier
+                        .padding(9.dp)
+                        .size(18.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .combinedClickable(
+                            onClick = onSwapAuto,
+                            onLongClick = onSwapPick
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.SwapHoriz,
+                        contentDescription = "Wymień utwór (przytrzymaj, by wybrać z listy)",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Sekcja: picker ręcznej wymiany utworu (bottom sheet)
+// ══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun SwapPickerSheet(
+    picking: SwapState.Picking,
+    onPick: (SuggestNextTrackUseCase.Candidate) -> Unit,
+    onShowDetail: (Track) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Text(
+                "Wymień utwór",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // Zastępowany utwór
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        if (picking.original.isAnchor) "Zastępowany · kotwica na playliście"
+                        else "Zastępowany",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        picking.original.track.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        picking.original.track.artist,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Kandydaci z puli ${picking.original.pool.name} (wg dopasowania)",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                itemsIndexed(picking.candidates) { idx, candidate ->
+                    CandidateRow(
+                        rank = idx + 1,
+                        candidate = candidate,
+                        onClick = { onPick(candidate) },
+                        onShowDetail = { onShowDetail(candidate.track) }
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -2063,11 +2232,22 @@ private fun SaveSuccessDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isAppend) "Utwory dopisane" else "Playlista utworzona") },
+        title = {
+            Text(
+                when {
+                    isAppend && trackCount == 0 -> "Playlista zaktualizowana"
+                    isAppend -> "Utwory dopisane"
+                    else -> "Playlista utworzona"
+                }
+            )
+        },
         text = {
             Text(
-                if (isAppend) "Dopisano $trackCount utworów do playlisty."
-                else "Zapisano $trackCount utworów do Spotify."
+                when {
+                    isAppend && trackCount == 0 -> "Zaktualizowano utwory na playliście."
+                    isAppend -> "Dopisano $trackCount utworów do playlisty."
+                    else -> "Zapisano $trackCount utworów do Spotify."
+                }
             )
         },
         confirmButton = {
