@@ -37,8 +37,8 @@ app/
 | HTTP | Retrofit + OkHttp |
 | Zdjęcia | Coil |
 | Baza danych | Room (cache audio features) |
-| Tokeny | DataStore Preferences |
-| Auth | Spotify Auth SDK 3.1.0 |
+| Tokeny | DataStore Preferences (access + refresh token) |
+| Auth | OAuth 2.0 Authorization Code + PKCE (Custom Tabs) |
 | Wykres energii | Compose Canvas |
 
 ## Konfiguracja

@@ -23,6 +23,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Zimny start z deep-linku OAuth (proces mógł zginąć podczas Custom Tab) —
+        // przekaż redirect do tej samej instancji ViewModelu co ekran logowania.
+        intent?.data?.let { uri -> loginViewModel.handleAuthCallback(uri) }
+
         setContent {
             SpotifyPlaylistManagerTheme {
                 val navController = rememberNavController()
