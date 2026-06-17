@@ -28,14 +28,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Callback OAuth Spotify – musi pasować do redirectUri w buildConfigField -->
+            <!-- Callback OAuth Spotify – musi pasować do redirectUri w buildConfigField.
+                 BEZ pathPattern: redirect "com.spotify.playlistmanager://callback" ma
+                 pusta sciezke (callback = host), a filtr z pathPattern nie dopasowalby
+                 sie do URI bez sciezki -> przegladarka nie otworzylaby aplikacji. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:host="${redirectHostName}"
-                    android:pathPattern="${redirectPathPattern}"
                     android:scheme="${redirectSchemeName}" />
             </intent-filter>
         </activity>
