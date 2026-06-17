@@ -32,13 +32,11 @@ import com.spotify.playlistmanager.ui.theme.SpotifyBlack
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
 @Composable
-fun LoginScreen(
-    onLoginSuccess: () -> Unit
-) {
+fun LoginScreen() {
     val context = LocalContext.current
     // ViewModel współdzielony z MainActivity (zakres aktywności), aby callback
-    // OAuth obsłużony w MainActivity.onNewIntent trafił do tej samej instancji,
-    // a stan logowania (Loading/Error/Success) był spójny z ekranem.
+    // OAuth obsłużony w MainActivity.onNewIntent trafił do tej samej instancji
+    // i błędy logowania były widoczne na ekranie.
     val activity = context as ComponentActivity
     val viewModel: LoginViewModel = hiltViewModel(activity)
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -48,9 +46,8 @@ fun LoginScreen(
         viewModel.authUrl.collect { url -> openAuthTab(context, url) }
     }
 
-    LaunchedEffect(uiState) {
-        if (uiState is LoginUiState.Success) onLoginSuccess()
-    }
+    // Nawigacja logowanie -> aplikacja jest sterowana centralnie w MainActivity
+    // przez obserwację isLoggedIn (po zapisaniu tokenów). Tu obsługujemy tylko UI.
 
     Box(
         modifier = Modifier

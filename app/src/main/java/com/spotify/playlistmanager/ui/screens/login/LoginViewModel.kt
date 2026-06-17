@@ -139,8 +139,9 @@ class LoginViewModel @Inject constructor(
                     ).execute()
                 }
                 val body = resp.body()
-                check(resp.isSuccessful && body != null) {
-                    "Wymiana kodu na token nie powiodła się (HTTP ${resp.code()})"
+                if (!resp.isSuccessful || body == null) {
+                    val detail = runCatching { resp.errorBody()?.string() }.getOrNull().orEmpty()
+                    error("Logowanie nie powiodło się (HTTP ${resp.code()}). $detail".trim())
                 }
                 tokenManager.saveTokens(
                     accessToken = body.access_token,
