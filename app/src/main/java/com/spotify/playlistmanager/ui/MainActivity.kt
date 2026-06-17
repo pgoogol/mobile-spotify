@@ -23,23 +23,43 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Zimny start z deep-linku OAuth (proces mógł zginąć podczas Custom Tab) —
+        // przekaż redirect do tej samej instancji ViewModelu co ekran logowania.
+        // Tylko przy świeżym utworzeniu — żeby nie przetwarzać kodu ponownie po obrocie.
+        if (savedInstanceState == null) {
+            intent?.data?.let { uri -> loginViewModel.handleAuthCallback(uri) }
+        }
+
         setContent {
             SpotifyPlaylistManagerTheme {
                 val navController = rememberNavController()
                 val isLoggedIn by mainViewModel.isLoggedIn.collectAsStateWithLifecycle()
 
-                // Obsługa wygasłego tokena (401) — ViewModel eksponuje sessionExpired
+                // Wyczyść sesję po 401, którego nie dało się odświeżyć.
+                // Nawigacja do logowania nastąpi przez obserwację isLoggedIn poniżej.
                 LaunchedEffect(Unit) {
                     mainViewModel.sessionExpired.collect {
                         mainViewModel.forceLogout()
+                    }
+                }
+
+                // Jedno źródło prawdy dla nawigacji logowanie <-> aplikacja.
+                // Po udanej wymianie tokenów isLoggedIn = true → wejście do aplikacji;
+                // po wylogowaniu/utracie sesji → powrót na ekran logowania.
+                LaunchedEffect(isLoggedIn) {
+                    val currentRoute = navController.currentDestination?.route
+                    if (isLoggedIn) {
+                        mainViewModel.onAppForeground()
+                        if (currentRoute == Screen.Login.route) {
+                            navController.navigate(Screen.Playlists.route) {
+                                popUpTo(Screen.Login.route) { inclusive = true }
+                            }
+                        }
+                    } else if (currentRoute != null && currentRoute != Screen.Login.route) {
                         navController.navigate(Screen.Login.route) {
                             popUpTo(0) { inclusive = true }
                         }
                     }
-                }
-
-                LaunchedEffect(isLoggedIn) {
-                    if (isLoggedIn) mainViewModel.onAppForeground()
                 }
 
                 AppScaffold(

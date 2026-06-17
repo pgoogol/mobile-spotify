@@ -63,6 +63,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
+    // Chrome Custom Tabs – logowanie OAuth (Authorization Code + PKCE)
+    implementation(libs.androidx.browser)
+
     // Compose BOM – wszystkie wersje Compose spójne
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)

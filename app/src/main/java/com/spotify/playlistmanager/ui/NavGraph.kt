@@ -154,11 +154,9 @@ fun AppNavGraph(
     NavHost(navController = navController, startDestination = startDestination) {
 
         composable(Screen.Login.route) {
-            LoginScreen(onLoginSuccess = {
-                navController.navigate(Screen.Playlists.route) {
-                    popUpTo(Screen.Login.route) { inclusive = true }
-                }
-            })
+            // Nawigacja do aplikacji po zalogowaniu jest sterowana w MainActivity
+            // (obserwacja isLoggedIn) — jedno źródło prawdy.
+            LoginScreen()
         }
 
         composable(Screen.Playlists.route) {

@@ -1,7 +1,10 @@
 package com.spotify.playlistmanager.ui.screens.login
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.ComponentActivity
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -25,27 +28,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.spotify.sdk.android.auth.AuthorizationClient
 import com.spotify.playlistmanager.ui.theme.SpotifyBlack
 import com.spotify.playlistmanager.ui.theme.SpotifyGreen
 
 @Composable
-fun LoginScreen(
-    onLoginSuccess: () -> Unit,
-    viewModel: LoginViewModel = hiltViewModel()
-) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+fun LoginScreen() {
     val context = LocalContext.current
+    // ViewModel współdzielony z MainActivity (zakres aktywności), aby callback
+    // OAuth obsłużony w MainActivity.onNewIntent trafił do tej samej instancji
+    // i błędy logowania były widoczne na ekranie.
+    val activity = context as ComponentActivity
+    val viewModel: LoginViewModel = hiltViewModel(activity)
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    val authLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        viewModel.handleActivityResult(result.resultCode, result.data)
+    // Otwórz URL autoryzacji w Custom Tab, gdy ViewModel go wyemituje.
+    LaunchedEffect(Unit) {
+        viewModel.authUrl.collect { url -> openAuthTab(context, url) }
     }
 
-    LaunchedEffect(uiState) {
-        if (uiState is LoginUiState.Success) onLoginSuccess()
-    }
+    // Nawigacja logowanie -> aplikacja jest sterowana centralnie w MainActivity
+    // przez obserwację isLoggedIn (po zapisaniu tokenów). Tu obsługujemy tylko UI.
 
     Box(
         modifier = Modifier
@@ -90,12 +92,7 @@ fun LoginScreen(
                 }
             }
             Button(
-                onClick = {
-                    val activity = context as? androidx.activity.ComponentActivity ?: return@Button
-                    val request = viewModel.buildAuthRequest()
-                    val intent  = AuthorizationClient.createLoginActivityIntent(activity, request)
-                    authLauncher.launch(intent)
-                },
+                onClick = { viewModel.onLoginClicked() },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 enabled  = uiState !is LoginUiState.Loading,
                 shape    = RoundedCornerShape(28.dp),
@@ -112,9 +109,30 @@ fun LoginScreen(
                 }
             }
             Text(
-                "Wymagana aplikacja Spotify zainstalowana na urządzeniu",
+                "Logowanie odbywa się bezpiecznie przez Spotify (Authorization Code + PKCE)",
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center, color = Color.White.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
+
+/**
+ * Otwiera URL autoryzacji w Chrome Custom Tab (współdzieli sesję przeglądarki
+ * i sam zamyka się po redirectcie). Fallback na zwykłą przeglądarkę, gdy
+ * Custom Tabs nie są dostępne.
+ */
+private fun openAuthTab(context: Context, url: String) {
+    val uri = Uri.parse(url)
+    runCatching {
+        CustomTabsIntent.Builder()
+            .setShowTitle(true)
+            .build()
+            .launchUrl(context, uri)
+    }.onFailure {
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }
     }

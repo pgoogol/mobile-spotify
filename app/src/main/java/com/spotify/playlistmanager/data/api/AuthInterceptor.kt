@@ -6,17 +6,15 @@ import okhttp3.Response
 import javax.inject.Inject
 
 /**
- * OkHttp Interceptor – wstrzykuje nagłówek Authorization: Bearer <token>
- * i obsługuje odpowiedź 401 (wygasły token).
+ * OkHttp Interceptor – wstrzykuje nagłówek Authorization: Bearer <token>.
  *
- * Zmiany względem poprzedniej wersji:
- * - Korzysta z in-memory cache w TokenManager (brak runBlocking)
- * - Przy odpowiedzi 401 emituje sygnał do AuthEventBus, co wymusza
- *   ponowne logowanie w MainActivity bez restartu aplikacji
+ * Obsługę 401 przejął [TokenAuthenticator]: przy wygaśnięciu tokena próbuje
+ * cicho odświeżyć sesję (refresh_token) i ponowić żądanie, a dopiero gdy to
+ * zawiedzie — wymusza ponowne logowanie. Interceptor sam nie reaguje już na 401,
+ * żeby pojedynczy, przejściowy błąd nie czyścił całej sesji.
  */
 class AuthInterceptor @Inject constructor(
-    private val tokenManager: TokenManager,
-    private val authEventBus: AuthEventBus
+    private val tokenManager: TokenManager
 ) : Interceptor {
 
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -26,12 +24,6 @@ class AuthInterceptor @Inject constructor(
             if (token != null) header("Authorization", "Bearer $token")
         }.build()
 
-        val response = chain.proceed(request)
-
-        if (response.code == 401) {
-            authEventBus.emitUnauthorized()
-        }
-
-        return response
+        return chain.proceed(request)
     }
 }
