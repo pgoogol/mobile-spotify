@@ -251,7 +251,12 @@ data class StepwiseUiState(
 
     // ── Generator bloków (Plan imprezy / Live) ─────────────
     val generatorMode: GeneratorMode = GeneratorMode.STEPWISE,
-    /** Przeanalizowana pula utworów per styl (cache po zmianie poolA/poolB). */
+    /**
+     * Przeanalizowane utwory zmapowane wg POCHODZENIA puli źródłowej:
+     * pula A → [Style.SALSA], pula B → [Style.BACHATA] (cache po zmianie
+     * poolA/poolB). Klucz to styl generatora przypisany do źródła, nie
+     * wykryty gatunek pojedynczego utworu. Patrz `ensureAnalyzedPool`.
+     */
     val analyzedByStyle: Map<Style, List<AnalyzedTrack>> = emptyMap(),
     val isAnalyzingPool: Boolean = false,
     /** Plan imprezy — czas trwania w ms (slider 30 min – 6 h). */
@@ -1514,8 +1519,22 @@ class StepwiseViewModel @Inject constructor(
     }
 
     /**
-     * Cache'owana analiza puli (poolA + poolB) — uruchamiana lazy.
-     * Wynik trafia do `state.analyzedByStyle` i jest invalidowany przy zmianie pul.
+     * Cache'owana analiza pul źródłowych — uruchamiana lazy.
+     *
+     * KLUCZOWE: każda pula źródłowa jest analizowana ODDZIELNIE i mapowana na
+     * styl generatora wg POCHODZENIA (pula A → SALSA, pula B → BACHATA) — taki
+     * sam kontrakt, jaki pokazuje UI ("A (salsa)" / "B (bachata)") oraz tryb
+     * krok-po-kroku (który czerpie wprost z `activePoolSlot.tracks`).
+     *
+     * Wcześniej obie pule były łączone w jedną listę i kubełkowane wg
+     * GLOBALNIE wykrytego gatunku. Przy dwóch playlistach źródłowych z tandą
+     * (np. 4:2) powodowało to dobieranie utworów z niewłaściwej playlisty —
+     * np. utwór z playlisty B wykryty jako „salsa" wpadał do bloku puli A.
+     * Analiza per pula utrzymuje rozdział źródeł.
+     *
+     * Utwory zachowują swój wykryty profil energii (z [TrackAnalyzer]); zmienia
+     * się jedynie klucz kubełka — z gatunku na pochodzenie. Wynik trafia do
+     * `state.analyzedByStyle` i jest invalidowany przy zmianie pul.
      */
     private suspend fun ensureAnalyzedPool(): Map<Style, List<AnalyzedTrack>> {
         val cached = _state.value.analyzedByStyle
@@ -1523,12 +1542,27 @@ class StepwiseViewModel @Inject constructor(
 
         _state.update { it.copy(isAnalyzingPool = true) }
         val s = _state.value
-        val combined = (s.poolA.tracks + (s.poolB?.tracks ?: emptyList())).distinctBy { it.id }
-        val ids = combined.mapNotNull { it.id }
+
+        val aTracks = s.poolA.tracks
+        val bTracks = s.poolB?.tracks.orEmpty()
+        val ids = (aTracks + bTracks).mapNotNull { it.id }.distinct()
         val features = runCatching {
             featuresRepository.getFeaturesMap(ids)
         }.getOrDefault(emptyMap())
-        val result = trackAnalyzer.analyzePool(combined, features)
+
+        // Analiza ODDZIELNIE per pula — `analyzePool` zwraca mapę wg wykrytego
+        // gatunku, ale my spłaszczamy ją i przypisujemy CAŁĄ pulę do stylu
+        // wynikającego z jej pochodzenia (A→SALSA, B→BACHATA). Puste listy
+        // pomijamy, żeby `analyzed[style].isEmpty()` w trybach Live/Plan dawało
+        // czytelny błąd „pula pusta".
+        val result = buildMap<Style, List<AnalyzedTrack>> {
+            val a = trackAnalyzer.analyzePool(aTracks, features).values.flatten()
+            if (a.isNotEmpty()) put(Style.SALSA, a)
+            if (s.poolB != null) {
+                val b = trackAnalyzer.analyzePool(bTracks, features).values.flatten()
+                if (b.isNotEmpty()) put(Style.BACHATA, b)
+            }
+        }
         _state.update { it.copy(analyzedByStyle = result, isAnalyzingPool = false) }
         return result
     }
