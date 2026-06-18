@@ -1,11 +1,28 @@
-# Spotify Playlist Manager – Android
+# Spotify Playlist Manager
 
-Aplikacja Android przepisana z Pythona (tkinter) na **Kotlin + Jetpack Compose**.
+Aplikacja przepisana z Pythona (tkinter) na **Kotlin + Compose**, dostępna w
+dwóch wariantach dzielących wspólną logikę domenową:
+
+- **Android** (`:app`) – Jetpack Compose + Hilt
+- **Desktop** (`:desktop`) – Compose for Desktop (JVM) — patrz
+  [Wersja desktopowa](#wersja-desktopowa-compose-for-desktop)
 
 ## Architektura
 
 ```
 MVVM + Clean Architecture + Hilt DI
+```
+
+### Moduły (Kotlin Multiplatform)
+
+```
+:shared    – KMP (androidTarget + jvm("desktop"))
+             cała czysta logika domenowa: generator, krzywe energii,
+             composite score, algorytmy DJ, modele
+             └ src/jvmShared/  – kod wspólny dla obu celów JVM
+             └ src/androidMain/ – kod zależny od Androida (Coil, Hilt @Inject)
+:app       – aplikacja Android (konsumuje android target :shared)
+:desktop   – aplikacja desktopowa (konsumuje jvm("desktop") target :shared)
 ```
 
 ```
@@ -81,6 +98,47 @@ lub otwórz projekt w **Android Studio** (Hedgehog+) i kliknij Run.
 **Wymagania:**
 - Android 8.0+ (API 26+)
 - Zainstalowana aplikacja Spotify na urządzeniu
+
+## Wersja desktopowa (Compose for Desktop)
+
+Aplikacja desktopowa (`:desktop`) reużywa **tej samej logiki** co Android —
+moduł `:shared` jest projektem Kotlin Multiplatform z celami `androidTarget()`
+oraz `jvm("desktop")`.
+
+### Uruchomienie
+
+```bash
+./gradlew :desktop:run
+```
+
+Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
+
+```bash
+./gradlew :desktop:packageDistributionForCurrentOS
+```
+
+**Wymagania:** JDK 21.
+
+### Co zawiera
+
+Pierwsze wydanie desktopowe pokazuje **generator krzywych energii** napędzany
+algorytmem `EnergyCurveCalculator` z `:shared`:
+
+- wybór strategii segmentu (Narastająco / Opadająco / Łuk / Dolina / Fala /
+  Romantycznie / Spokojnie / …),
+- regulację liczby utworów,
+- wykres krzywej docelowej vs rzeczywistej (Compose Canvas),
+- listę dopasowanych utworów z composite score.
+
+Działa na wbudowanej puli przykładowej (`SampleData`) — bez logowania do Spotify.
+
+### Następne kroki (do rozbudowy)
+
+- Klient **Spotify Web API** współdzielony przez `:shared` (np. Ktor zamiast
+  Retrofit, by działał na obu celach).
+- **OAuth 2.0 PKCE** dla desktopu: redirect na loopback
+  `http://127.0.0.1:<port>/callback` (zamiast deep-linku Androida).
+- Port kolejnych ekranów (playlisty, utwory, pełny generator wielu źródeł).
 
 ## Funkcjonalności
 
