@@ -119,26 +119,39 @@ Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
 
 **Wymagania:** JDK 21.
 
+### Konfiguracja (Client ID + Redirect URI)
+
+1. W [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   dodaj **Redirect URI** dla desktopu:
+   ```
+   http://127.0.0.1:8888/callback
+   ```
+2. Podaj **Client ID** jednym ze sposobów (czytane w tej kolejności):
+   - w `local.properties`: `spotify.clientId=TWOJ_CLIENT_ID`
+   - zmienna środowiskowa: `SPOTIFY_CLIENT_ID=...`
+   - argument JVM: `-Dspotify.clientId=...`
+
 ### Co zawiera
 
-Pierwsze wydanie desktopowe pokazuje **generator krzywych energii** napędzany
-algorytmem `EnergyCurveCalculator` z `:shared`:
+- **Logowanie do Spotify** — OAuth 2.0 Authorization Code + PKCE z redirectem
+  na loopback `http://127.0.0.1:8888/callback` (uruchamia lokalny serwer,
+  otwiera przeglądarkę, zapisuje tokeny w `~/.spotify-playlist-manager/`).
+- **Lista playlist** użytkownika + ❤ Polubione — prawdziwe dane z Web API,
+  pobrane przez współdzielony kontrakt `ISpotifyRepository` z `:shared`.
+- **Generator krzywych energii** (zakładka „Generator") na wbudowanej puli
+  `SampleData`: wybór strategii segmentu, liczby utworów, wykres docelowa vs
+  rzeczywista (Compose Canvas) i lista dopasowanych utworów z composite score.
 
-- wybór strategii segmentu (Narastająco / Opadająco / Łuk / Dolina / Fala /
-  Romantycznie / Spokojnie / …),
-- regulację liczby utworów,
-- wykres krzywej docelowej vs rzeczywistej (Compose Canvas),
-- listę dopasowanych utworów z composite score.
-
-Działa na wbudowanej puli przykładowej (`SampleData`) — bez logowania do Spotify.
+Warstwa sieci/repozytorium używa Retrofit/OkHttp/Gson (działają na JVM) i
+mapuje DTO z `:shared` na modele domenowe — tak samo jak `:app`.
 
 ### Następne kroki (do rozbudowy)
 
-- Klient **Spotify Web API** współdzielony przez `:shared` (np. Ktor zamiast
-  Retrofit, by działał na obu celach).
-- **OAuth 2.0 PKCE** dla desktopu: redirect na loopback
-  `http://127.0.0.1:<port>/callback` (zamiast deep-linku Androida).
-- Port kolejnych ekranów (playlisty, utwory, pełny generator wielu źródeł).
+- Ekran **utworów** ze statystykami i sortowaniem (jak na Androidzie).
+- Podpięcie generatora pod **prawdziwe playlisty** + import cech audio z CSV
+  oraz **zapis** wygenerowanej playlisty na Spotify.
+- Port **trybu DJ / Impreza** (plan + live).
+- Wyniesienie warstwy Web API do `:shared` (współdzielonej z `:app`).
 
 ## Funkcjonalności
 

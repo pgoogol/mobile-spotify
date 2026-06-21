@@ -25,6 +25,13 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
 
+    // Sieć — Retrofit/OkHttp/Gson działają na czystym JVM (desktop).
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation(libs.gson)
+
     // Dispatcher Main dla Compose Desktop (Swing event loop).
     implementation(libs.kotlinx.coroutines.swing)
 }

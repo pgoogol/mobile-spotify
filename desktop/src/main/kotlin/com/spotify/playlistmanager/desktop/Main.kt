@@ -6,13 +6,14 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.spotify.playlistmanager.desktop.theme.SpotifyDesktopTheme
-import com.spotify.playlistmanager.desktop.ui.GeneratorScreen
+import com.spotify.playlistmanager.desktop.ui.App
 
 /**
  * Punkt wejścia aplikacji desktopowej.
  *
- * Okno Compose for Desktop hostuje [GeneratorScreen], który napędzany jest
- * algorytmami z modułu :shared (te same, których używa aplikacja Android).
+ * Okno Compose for Desktop hostuje [App], który routuje między logowaniem,
+ * listą playlist (prawdziwe dane ze Spotify) i generatorem krzywych energii.
+ * Logika domenowa pochodzi z modułu :shared (wspólna z aplikacją Android).
  */
 fun main() = application {
     val windowState = rememberWindowState(size = DpSize(1180.dp, 800.dp))
@@ -22,7 +23,7 @@ fun main() = application {
         title = "Spotify Playlist Manager — Desktop"
     ) {
         SpotifyDesktopTheme {
-            GeneratorScreen()
+            App()
         }
     }
 }
