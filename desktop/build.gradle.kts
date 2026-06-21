@@ -24,6 +24,7 @@ dependencies {
 
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    implementation(compose.materialIconsExtended)
 
     // Sieć — Retrofit/OkHttp/Gson działają na czystym JVM (desktop).
     implementation(libs.retrofit)

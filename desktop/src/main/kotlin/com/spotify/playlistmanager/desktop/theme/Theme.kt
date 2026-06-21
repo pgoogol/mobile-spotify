@@ -5,31 +5,39 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-/** Spotify green — akcent marki. */
+// ── Spotify brand colors (1:1 z aplikacją mobilną) ──────────────────────────
 val SpotifyGreen = Color(0xFF1DB954)
+val SpotifyGreenDark = Color(0xFF158A3E)
+val SpotifyBlack = Color(0xFF121212)
+val SpotifyDarkGray = Color(0xFF181818)
+val SpotifyMidGray = Color(0xFF282828)
+val SpotifyLightGray = Color(0xFFB3B3B3)
+val SpotifyWhite = Color(0xFFFFFFFF)
+val ErrorRed = Color(0xFFCF6679)
+
+/** Bursztyn — krzywa „rzeczywista" na wykresie energii (jak na Androidzie). */
 val SpotifyAmber = Color(0xFFFFA726)
 
-private val SpotifyDarkColors = darkColorScheme(
+private val DarkColorScheme = darkColorScheme(
     primary = SpotifyGreen,
-    onPrimary = Color.Black,
-    secondary = SpotifyGreen,
-    background = Color(0xFF121212),
-    onBackground = Color(0xFFEDEDED),
-    surface = Color(0xFF181818),
-    onSurface = Color(0xFFEDEDED),
-    surfaceVariant = Color(0xFF282828),
-    onSurfaceVariant = Color(0xFFB3B3B3),
-    error = Color(0xFFCF6679),
+    onPrimary = SpotifyBlack,
+    primaryContainer = SpotifyGreenDark,
+    onPrimaryContainer = SpotifyWhite,
+    secondary = SpotifyLightGray,
+    onSecondary = SpotifyBlack,
+    background = SpotifyBlack,
+    onBackground = SpotifyWhite,
+    surface = SpotifyDarkGray,
+    onSurface = SpotifyWhite,
+    surfaceVariant = SpotifyMidGray,
+    onSurfaceVariant = SpotifyLightGray,
+    error = ErrorRed,
+    onError = SpotifyBlack,
+    outline = SpotifyMidGray,
 )
 
-/**
- * Ciemny motyw Spotify dla wersji desktopowej (Material3).
- * Odpowiednik motywu z modułu :app, przeniesiony na Compose Multiplatform.
- */
+/** Ciemny motyw Spotify — odpowiednik `SpotifyPlaylistManagerTheme` z `:app`. */
 @Composable
 fun SpotifyDesktopTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = SpotifyDarkColors,
-        content = content
-    )
+    MaterialTheme(colorScheme = DarkColorScheme, content = content)
 }

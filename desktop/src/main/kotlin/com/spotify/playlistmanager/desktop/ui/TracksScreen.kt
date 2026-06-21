@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistStats
 import com.spotify.playlistmanager.data.model.Track
 import com.spotify.playlistmanager.desktop.data.LIKED_ID
@@ -47,18 +46,23 @@ private sealed interface TracksUi {
  * statystykami — pobrana ze Spotify przez [ISpotifyRepository].
  */
 @Composable
-fun TracksScreen(repository: ISpotifyRepository, playlist: Playlist, onBack: () -> Unit) {
+fun TracksScreen(
+    repository: ISpotifyRepository,
+    playlistId: String,
+    playlistName: String,
+    onBack: () -> Unit,
+) {
     var ui by remember { mutableStateOf<TracksUi>(TracksUi.Loading) }
     var query by remember { mutableStateOf("") }
     var sort by remember { mutableStateOf(TrackSort.NONE) }
     var sortMenu by remember { mutableStateOf(false) }
 
-    LaunchedEffect(playlist.id) {
+    LaunchedEffect(playlistId) {
         ui = try {
-            val tracks = if (playlist.id == LIKED_ID) {
+            val tracks = if (playlistId == LIKED_ID) {
                 repository.getLikedTracks()
             } else {
-                repository.getPlaylistTracks(playlist.id)
+                repository.getPlaylistTracks(playlistId)
             }
             TracksUi.Data(tracks)
         } catch (e: Exception) {
@@ -74,7 +78,7 @@ fun TracksScreen(repository: ISpotifyRepository, playlist: Playlist, onBack: () 
             TextButton(onClick = onBack) { Text("‹ Wstecz") }
             Spacer(Modifier.width(8.dp))
             Text(
-                playlist.name,
+                playlistName,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
             )
