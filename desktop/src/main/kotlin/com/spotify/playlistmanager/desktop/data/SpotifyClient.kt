@@ -14,6 +14,9 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
+/** Syntetyczne ID playlisty „Polubione utwory" — zgodne z GeneratePlaylistUseCase.LIKED_SONGS_ID. */
+const val LIKED_ID = "__liked__"
+
 /**
  * Ręczne „DI" dla desktopu (bez Hilt) — spina sieć, auth i repozytorium.
  *

@@ -1,5 +1,6 @@
 package com.spotify.playlistmanager.desktop.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.spotify.playlistmanager.data.model.Playlist
+import com.spotify.playlistmanager.desktop.data.LIKED_ID
 import com.spotify.playlistmanager.desktop.theme.SpotifyGreen
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
 
@@ -34,11 +36,23 @@ private sealed interface PlaylistsUi {
 }
 
 /**
- * Lista playlist użytkownika pobrana ze Spotify Web API przez współdzielony
- * kontrakt [ISpotifyRepository].
+ * Zakładka playlist: lista playlist użytkownika (prawdziwe dane z Web API przez
+ * współdzielony [ISpotifyRepository]) z nawigacją do [TracksScreen] po kliknięciu.
  */
 @Composable
 fun PlaylistsScreen(repository: ISpotifyRepository) {
+    var selected by remember { mutableStateOf<Playlist?>(null) }
+
+    val current = selected
+    if (current == null) {
+        PlaylistsList(repository, onOpen = { selected = it })
+    } else {
+        TracksScreen(repository, current, onBack = { selected = null })
+    }
+}
+
+@Composable
+private fun PlaylistsList(repository: ISpotifyRepository, onOpen: (Playlist) -> Unit) {
     var ui by remember { mutableStateOf<PlaylistsUi>(PlaylistsUi.Loading) }
 
     LaunchedEffect(Unit) {
@@ -66,18 +80,20 @@ fun PlaylistsScreen(repository: ISpotifyRepository) {
         }
 
         is PlaylistsUi.Data -> LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            val liked = Playlist(
+                id = LIKED_ID,
+                name = "❤ Polubione utwory",
+                description = null,
+                imageUrl = null,
+                trackCount = state.likedCount,
+                ownerId = "",
+            )
             item {
-                PlaylistRow(
-                    title = "❤ Polubione utwory",
-                    subtitle = "${state.likedCount} utworów",
-                )
+                PlaylistRow(liked, onClick = { onOpen(liked) })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             }
             items(state.playlists) { playlist ->
-                PlaylistRow(
-                    title = playlist.name,
-                    subtitle = "${playlist.trackCount} utworów",
-                )
+                PlaylistRow(playlist, onClick = { onOpen(playlist) })
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
             }
         }
@@ -85,24 +101,36 @@ fun PlaylistsScreen(repository: ISpotifyRepository) {
 }
 
 @Composable
-private fun PlaylistRow(title: String, subtitle: String) {
+private fun PlaylistRow(playlist: Playlist, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
             Text(
-                subtitle,
+                playlist.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "${playlist.trackCount} utworów",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        Text(
+            "›",
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 @Composable
-private fun Centered(content: @Composable () -> Unit) {
+internal fun Centered(content: @Composable () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
