@@ -115,7 +115,7 @@ fun MainShell(client: SpotifyClient, onLogout: () -> Unit) {
                 Route.Stepwise -> PartyPlannerScreen(client)
                 Route.Profile -> ProfileScreen(client.repository)
                 is Route.Tracks -> TracksScreen(
-                    repository = client.repository,
+                    client = client,
                     playlistId = route.playlistId,
                     playlistName = route.playlistName,
                     onBack = { nav.pop() },
