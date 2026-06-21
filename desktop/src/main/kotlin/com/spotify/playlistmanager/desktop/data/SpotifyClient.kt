@@ -7,7 +7,10 @@ import com.spotify.playlistmanager.desktop.data.auth.SpotifyAuthApi
 import com.spotify.playlistmanager.desktop.data.auth.SpotifyAuthenticator
 import com.spotify.playlistmanager.desktop.data.auth.TokenStore
 import com.spotify.playlistmanager.desktop.data.repository.DesktopSpotifyRepository
+import com.spotify.playlistmanager.desktop.data.repository.InMemoryTrackFeaturesRepository
 import com.spotify.playlistmanager.domain.repository.ISpotifyRepository
+import com.spotify.playlistmanager.domain.repository.ITrackFeaturesRepository
+import com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -71,5 +74,9 @@ class SpotifyClient(private val clientId: String) {
         .create(SpotifyApiService::class.java)
 
     val repository: ISpotifyRepository = DesktopSpotifyRepository(api, tokenStore)
+    val featuresRepository: ITrackFeaturesRepository = InMemoryTrackFeaturesRepository()
     val authenticator = SpotifyAuthenticator(authApi, tokenStore, clientId)
+
+    /** Use-case generatora z :shared — ta sama logika co na Androidzie. */
+    val generatePlaylistUseCase = GeneratePlaylistUseCase(repository, featuresRepository)
 }

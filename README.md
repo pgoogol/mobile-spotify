@@ -138,18 +138,28 @@ Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
   otwiera przeglądarkę, zapisuje tokeny w `~/.spotify-playlist-manager/`).
 - **Lista playlist** użytkownika + ❤ Polubione — prawdziwe dane z Web API,
   pobrane przez współdzielony kontrakt `ISpotifyRepository` z `:shared`.
-- **Generator krzywych energii** (zakładka „Generator") na wbudowanej puli
-  `SampleData`: wybór strategii segmentu, liczby utworów, wykres docelowa vs
-  rzeczywista (Compose Canvas) i lista dopasowanych utworów z composite score.
+- **Ekran utworów** — kliknij playlistę, by zobaczyć jej utwory ze
+  statystykami (liczba + łączny czas).
+- **Generator playlist** (zakładka „Generator") na prawdziwych playlistach:
+  wybór playlisty źródłowej, strategii i liczby utworów → generowanie przez
+  `GeneratePlaylistUseCase` z `:shared` → **zapis nowej playlisty na Spotify**.
+- **Demo generatora** (zakładka „Demo") na wbudowanej puli `SampleData` —
+  pokazuje krzywe energii bez logowania.
 
 Warstwa sieci/repozytorium używa Retrofit/OkHttp/Gson (działają na JVM) i
-mapuje DTO z `:shared` na modele domenowe — tak samo jak `:app`.
+mapuje DTO z `:shared` na modele domenowe — tak samo jak `:app`. Cała logika
+generowania (`GeneratePlaylistUseCase`, `EnergyCurveCalculator`) jest
+współdzielona — mieszka w `src/jvmShared`.
+
+> Jakość krzywych energii zależy od **cech audio** (BPM/energia/…). Na
+> desktopie cechy nie są jeszcze importowane, więc strategie inne niż „Brak"
+> dają płaski wynik do czasu dodania importu CSV (patrz niżej).
 
 ### Następne kroki (do rozbudowy)
 
-- Ekran **utworów** ze statystykami i sortowaniem (jak na Androidzie).
-- Podpięcie generatora pod **prawdziwe playlisty** + import cech audio z CSV
-  oraz **zapis** wygenerowanej playlisty na Spotify.
+- **Import cech audio z CSV** (jak na Androidzie) → pełna jakość krzywych.
+- Sortowanie/filtrowanie na ekranie utworów.
+- Generator **wielu źródeł** naraz (obecnie jedno źródło na rundę).
 - Port **trybu DJ / Impreza** (plan + live).
 - Wyniesienie warstwy Web API do `:shared` (współdzielonej z `:app`).
 

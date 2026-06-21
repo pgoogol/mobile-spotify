@@ -32,6 +32,9 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.gson)
 
+    // Adnotacje @Inject/@Singleton na use-case'ach z :shared (obecne w runtime).
+    implementation(libs.javax.inject)
+
     // Dispatcher Main dla Compose Desktop (Swing event loop).
     implementation(libs.kotlinx.coroutines.swing)
 }

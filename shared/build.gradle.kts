@@ -34,6 +34,9 @@ kotlin {
             dependencies {
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.kotlinx.coroutines.core)
+                // Adnotacje DI (@Inject/@Singleton) w use-case'ach. compileOnly:
+                // na Androidzie dostarcza je Hilt (:app), desktop ich nie wymaga w runtime.
+                compileOnly(libs.javax.inject)
             }
         }
         val jvmSharedTest by creating {
