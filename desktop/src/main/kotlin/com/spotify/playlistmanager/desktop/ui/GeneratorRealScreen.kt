@@ -23,9 +23,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,49 +48,75 @@ import com.spotify.playlistmanager.domain.model.GenerateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import kotlin.math.roundToInt
 
+/** Konfiguracja pojedynczego źródła generatora (UI). */
+private data class SourceConfig(
+    val id: String = UUID.randomUUID().toString(),
+    val playlist: Playlist? = null,
+    val curve: EnergyCurve = EnergyCurve.None,
+    val trackCount: Int = 10,
+)
+
 /**
- * Generator na **prawdziwych** playlistach Spotify.
+ * Generator na **prawdziwych** playlistach Spotify, z obsługą **wielu źródeł**
+ * (każde z własną playlistą, strategią i liczbą utworów) — jak na Androidzie.
  *
- * Używa [com.spotify.playlistmanager.domain.usecase.GeneratePlaylistUseCase]
- * z :shared (ta sama logika co Android): pobiera utwory wybranej playlisty,
- * dopasowuje je do strategii krzywej energii i pozwala zapisać wynik jako
- * nową playlistę na Spotify.
+ * Używa `GeneratePlaylistUseCase.generateWithCurves(List<PlaylistSource>)` z
+ * :shared, pokazuje wynik i pozwala zapisać go jako nową playlistę na Spotify.
  *
- * Uwaga: jakość krzywych zależy od cech audio. Dopóki nie zaimportujesz CSV,
- * cechy są nieznane i strategie inne niż „Brak" dają płaski wynik.
+ * Jakość krzywych zależy od cech audio — użyj „Importuj CSV".
  */
 @Composable
 fun GeneratorRealScreen(client: SpotifyClient) {
     val scope = rememberCoroutineScope()
 
     var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
-    var selected by remember { mutableStateOf<Playlist?>(null) }
-    var curve by remember { mutableStateOf<EnergyCurve>(EnergyCurve.None) }
-    var trackCount by remember { mutableStateOf(20) }
+    val sources = remember { mutableStateListOf(SourceConfig()) }
     var result by remember { mutableStateOf<GenerateResult?>(null) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<String?>(null) }
-
-    var playlistMenu by remember { mutableStateOf(false) }
-    var strategyMenu by remember { mutableStateOf(false) }
     var featuresInfo by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         runCatching { client.repository.getUserPlaylists() }
-            .onSuccess { playlists = it; selected = it.firstOrNull() }
+            .onSuccess {
+                playlists = it
+                if (sources.size == 1 && sources[0].playlist == null) {
+                    sources[0] = sources[0].copy(playlist = it.firstOrNull())
+                }
+            }
             .onFailure { status = "Nie udało się pobrać playlist: ${it.message}" }
     }
 
+    fun importCsv() {
+        val file = CsvImport.pickFile() ?: return
+        busy = true
+        scope.launch {
+            runCatching {
+                val parsed = withContext(Dispatchers.IO) { file.inputStream().use { CsvParser.parse(it) } }
+                client.featuresRepository.upsert(parsed.features)
+                parsed.features.size
+            }.onSuccess { busy = false; featuresInfo = "Zaimportowano $it cech audio" }
+                .onFailure { busy = false; featuresInfo = "Błąd importu CSV: ${it.message}" }
+        }
+    }
+
     fun generate() {
-        val source = selected ?: return
+        val configured = sources.filter { it.playlist != null }
+        if (configured.isEmpty()) {
+            status = "Dodaj przynajmniej jedną playlistę."
+            return
+        }
         busy = true
         status = null
         scope.launch {
             runCatching {
                 client.generatePlaylistUseCase.generateWithCurves(
-                    listOf(PlaylistSource(playlist = source, trackCount = trackCount, energyCurve = curve)),
+                    configured.map {
+                        PlaylistSource(playlist = it.playlist, trackCount = it.trackCount, energyCurve = it.curve)
+                    },
                 ).generateResult
             }.onSuccess { result = it; busy = false }
                 .onFailure { status = "Błąd generowania: ${it.message}"; busy = false }
@@ -102,32 +131,14 @@ fun GeneratorRealScreen(client: SpotifyClient) {
             runCatching {
                 val uris = res.tracks.mapNotNull { it.uri }
                 require(uris.isNotEmpty()) { "Brak utworów z URI do zapisania." }
-                val name = "Wygenerowano · ${curve.displayName}"
                 val id = client.repository.createPlaylist(
-                    name,
+                    "Wygenerowano (${sources.count { it.playlist != null }} źródeł)",
                     "Spotify Playlist Manager (desktop)",
                 )
                 client.repository.addTracksToPlaylist(id, uris)
                 uris.size
-            }.onSuccess { count ->
-                busy = false
-                status = "Zapisano playlistę na Spotify ✓ ($count utworów)"
-            }.onFailure { busy = false; status = "Błąd zapisu: ${it.message}" }
-        }
-    }
-
-    fun importCsv() {
-        val file = CsvImport.pickFile() ?: return
-        busy = true
-        scope.launch {
-            runCatching {
-                val parsed = withContext(Dispatchers.IO) { file.inputStream().use { CsvParser.parse(it) } }
-                client.featuresRepository.upsert(parsed.features)
-                parsed
-            }.onSuccess {
-                busy = false
-                featuresInfo = "Zaimportowano ${it.features.size} cech audio (pominięto ${it.skipped})"
-            }.onFailure { busy = false; featuresInfo = "Błąd importu CSV: ${it.message}" }
+            }.onSuccess { busy = false; status = "Zapisano playlistę na Spotify ✓ ($it utworów)" }
+                .onFailure { busy = false; status = "Błąd zapisu: ${it.message}" }
         }
     }
 
@@ -136,92 +147,46 @@ fun GeneratorRealScreen(client: SpotifyClient) {
             modifier = Modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                "Generator playlist (Spotify)",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
+            Text("Generator playlist (Spotify)", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
 
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // Źródłowa playlista
-                        Box {
-                            OutlinedButton(onClick = { playlistMenu = true }) {
-                                Text(selected?.name ?: "Wybierz playlistę")
-                            }
-                            DropdownMenu(expanded = playlistMenu, onDismissRequest = { playlistMenu = false }) {
-                                playlists.forEach { pl ->
-                                    DropdownMenuItem(
-                                        text = { Text("${pl.name}  (${pl.trackCount})") },
-                                        onClick = { selected = pl; playlistMenu = false },
-                                    )
-                                }
-                            }
-                        }
-
-                        // Strategia
-                        Box {
-                            OutlinedButton(onClick = { strategyMenu = true }) {
-                                Text(curve.displayName)
-                            }
-                            DropdownMenu(expanded = strategyMenu, onDismissRequest = { strategyMenu = false }) {
-                                EnergyCurve.presets.forEach { preset ->
-                                    DropdownMenuItem(
-                                        text = { Text(preset.displayName) },
-                                        onClick = { curve = preset; strategyMenu = false },
-                                    )
-                                }
-                            }
-                        }
-
-                        // Liczba utworów
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Liczba utworów: $trackCount", style = MaterialTheme.typography.labelLarge)
-                            Slider(
-                                value = trackCount.toFloat(),
-                                onValueChange = { trackCount = it.roundToInt() },
-                                valueRange = 4f..50f,
-                                steps = 45,
+                    sources.forEachIndexed { index, config ->
+                        key(config.id) {
+                            SourceRow(
+                                index = index,
+                                config = config,
+                                playlists = playlists,
+                                canRemove = sources.size > 1,
+                                onChange = { sources[index] = it },
+                                onRemove = { sources.removeAt(index) },
                             )
                         }
-
-                        Button(onClick = { generate() }, enabled = selected != null && !busy) {
-                            Text("Generuj")
-                        }
                     }
-                    Text(
-                        curve.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        OutlinedButton(onClick = { sources.add(SourceConfig(playlist = playlists.firstOrNull())) }) {
+                            Text("+ Dodaj źródło")
+                        }
                         OutlinedButton(onClick = { importCsv() }, enabled = !busy) {
-                            Text("Importuj CSV (cechy audio)")
+                            Text("Importuj CSV")
                         }
                         featuresInfo?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        Spacer(Modifier.weight(1f))
+                        Button(onClick = { generate() }, enabled = !busy) { Text("Generuj") }
                     }
                 }
             }
 
-            if (busy) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SpotifyGreen)
-            }
+            if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SpotifyGreen)
             status?.let { msg ->
                 Text(
                     msg,
@@ -234,10 +199,7 @@ fun GeneratorRealScreen(client: SpotifyClient) {
             if (res != null) {
                 res.segments.firstOrNull()?.let { EnergyCurveChart(it) }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "${res.tracks.size} utworów · dopasowanie ${(res.overallMatchPercentage * 100).toInt()}%",
                         style = MaterialTheme.typography.bodyMedium,
@@ -267,6 +229,67 @@ fun GeneratorRealScreen(client: SpotifyClient) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SourceRow(
+    index: Int,
+    config: SourceConfig,
+    playlists: List<Playlist>,
+    canRemove: Boolean,
+    onChange: (SourceConfig) -> Unit,
+    onRemove: () -> Unit,
+) {
+    var playlistMenu by remember { mutableStateOf(false) }
+    var strategyMenu by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("${index + 1}.", modifier = Modifier.width(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Box {
+            OutlinedButton(onClick = { playlistMenu = true }) {
+                Text(config.playlist?.name ?: "Wybierz playlistę")
+            }
+            DropdownMenu(expanded = playlistMenu, onDismissRequest = { playlistMenu = false }) {
+                playlists.forEach { pl ->
+                    DropdownMenuItem(
+                        text = { Text("${pl.name}  (${pl.trackCount})") },
+                        onClick = { onChange(config.copy(playlist = pl)); playlistMenu = false },
+                    )
+                }
+            }
+        }
+
+        Box {
+            OutlinedButton(onClick = { strategyMenu = true }) { Text(config.curve.displayName) }
+            DropdownMenu(expanded = strategyMenu, onDismissRequest = { strategyMenu = false }) {
+                EnergyCurve.presets.forEach { preset ->
+                    DropdownMenuItem(
+                        text = { Text(preset.displayName) },
+                        onClick = { onChange(config.copy(curve = preset)); strategyMenu = false },
+                    )
+                }
+            }
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Utworów: ${config.trackCount}", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = config.trackCount.toFloat(),
+                onValueChange = { onChange(config.copy(trackCount = it.roundToInt())) },
+                valueRange = 1f..50f,
+                steps = 48,
+            )
+        }
+
+        if (canRemove) {
+            TextButton(onClick = onRemove) { Text("Usuń") }
         }
     }
 }

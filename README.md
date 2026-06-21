@@ -142,9 +142,10 @@ http://127.0.0.1:8888/callback
   pobrane przez współdzielony kontrakt `ISpotifyRepository` z `:shared`.
 - **Ekran utworów** — kliknij playlistę, by zobaczyć jej utwory ze
   statystykami (liczba + łączny czas), **filtrowaniem i sortowaniem**.
-- **Generator playlist** (zakładka „Generator") na prawdziwych playlistach:
-  wybór playlisty źródłowej, strategii i liczby utworów → generowanie przez
-  `GeneratePlaylistUseCase` z `:shared` → **zapis nowej playlisty na Spotify**.
+- **Generator playlist** (zakładka „Generator") na prawdziwych playlistach,
+  z obsługą **wielu źródeł** (każde z własną playlistą, strategią i liczbą
+  utworów) → generowanie przez `GeneratePlaylistUseCase` z `:shared` →
+  **zapis nowej playlisty na Spotify**.
 - **Impreza DJ** (zakładka „Impreza DJ") — tryb Plan: wybór puli, czasu,
   proporcji salsa/bachata i łuku energii → `PartyPlanner`/`TrackAnalyzer` z
   `:shared` budują plan bloków → zapis na Spotify.
@@ -165,7 +166,6 @@ jest współdzielona — mieszka w `src/jvmShared`.
 
 ### Następne kroki (do rozbudowy)
 
-- Generator **wielu źródeł** naraz (obecnie jedno źródło na rundę).
 - Tryb **Live** Imprezy DJ (na desktopie jest na razie tryb Plan).
 - Wyniesienie warstwy Web API do `:shared` (współdzielonej z `:app`).
 
