@@ -30,6 +30,8 @@ import com.spotify.playlistmanager.desktop.theme.SpotifyGreen
 private enum class Tab(val label: String) {
     PLAYLISTS("Playlisty"),
     GENERATOR("Generator"),
+    DJ("Impreza DJ"),
+    PROFILE("Profil"),
     DEMO("Demo (przykładowe)"),
 }
 
@@ -80,6 +82,8 @@ fun MainScreen(client: SpotifyClient, onLogout: () -> Unit) {
                 when (tab) {
                     Tab.PLAYLISTS -> PlaylistsScreen(client.repository)
                     Tab.GENERATOR -> GeneratorRealScreen(client)
+                    Tab.DJ -> PartyPlannerScreen(client)
+                    Tab.PROFILE -> ProfileScreen(client.repository)
                     Tab.DEMO -> GeneratorScreen()
                 }
             }

@@ -119,17 +119,19 @@ Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
 
 **Wymagania:** JDK 21.
 
-### Konfiguracja (Client ID + Redirect URI)
+### Konfiguracja (Redirect URI)
 
-1. W [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-   dodaj **Redirect URI** dla desktopu:
-   ```
-   http://127.0.0.1:8888/callback
-   ```
-2. Podaj **Client ID** jednym ze sposobów (czytane w tej kolejności):
-   - w `local.properties`: `spotify.clientId=TWOJ_CLIENT_ID`
-   - zmienna środowiskowa: `SPOTIFY_CLIENT_ID=...`
-   - argument JVM: `-Dspotify.clientId=...`
+**Client ID** jest już ustawiony w `local.properties` (`spotify.clientId`,
+ten sam klient publiczny co Android). Wystarczy w
+[Spotify Developer Dashboard](https://developer.spotify.com/dashboard) dodać
+**Redirect URI** dla desktopu:
+
+```
+http://127.0.0.1:8888/callback
+```
+
+> Client ID czytany jest w kolejności: `-Dspotify.clientId=...` →
+> `SPOTIFY_CLIENT_ID` (env) → `local.properties` (`spotify.clientId`).
 
 ### Co zawiera
 
@@ -139,12 +141,17 @@ Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
 - **Lista playlist** użytkownika + ❤ Polubione — prawdziwe dane z Web API,
   pobrane przez współdzielony kontrakt `ISpotifyRepository` z `:shared`.
 - **Ekran utworów** — kliknij playlistę, by zobaczyć jej utwory ze
-  statystykami (liczba + łączny czas).
+  statystykami (liczba + łączny czas), **filtrowaniem i sortowaniem**.
 - **Generator playlist** (zakładka „Generator") na prawdziwych playlistach:
   wybór playlisty źródłowej, strategii i liczby utworów → generowanie przez
   `GeneratePlaylistUseCase` z `:shared` → **zapis nowej playlisty na Spotify**.
-- **Import cech audio z CSV** (przycisk w generatorze) — ten sam `CsvParser` co
-  na Androidzie; zasila krzywe energii rzeczywistymi danymi (BPM/energia/valence).
+- **Impreza DJ** (zakładka „Impreza DJ") — tryb Plan: wybór puli, czasu,
+  proporcji salsa/bachata i łuku energii → `PartyPlanner`/`TrackAnalyzer` z
+  `:shared` budują plan bloków → zapis na Spotify.
+- **Profil** (zakładka „Profil") — dane konta i top artyści.
+- **Import cech audio z CSV** (przycisk w generatorze i w Imprezie DJ) — ten sam
+  `CsvParser` co na Androidzie; zasila krzywe energii i analizę DJ rzeczywistymi
+  danymi (BPM/energia/valence/genres).
 - **Demo generatora** (zakładka „Demo") na wbudowanej puli `SampleData` —
   pokazuje krzywe energii bez logowania.
 
@@ -158,9 +165,8 @@ jest współdzielona — mieszka w `src/jvmShared`.
 
 ### Następne kroki (do rozbudowy)
 
-- Sortowanie/filtrowanie na ekranie utworów.
 - Generator **wielu źródeł** naraz (obecnie jedno źródło na rundę).
-- Port **trybu DJ / Impreza** (plan + live).
+- Tryb **Live** Imprezy DJ (na desktopie jest na razie tryb Plan).
 - Wyniesienie warstwy Web API do `:shared` (współdzielonej z `:app`).
 
 ## Funkcjonalności

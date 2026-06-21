@@ -7,12 +7,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,6 +49,9 @@ private sealed interface TracksUi {
 @Composable
 fun TracksScreen(repository: ISpotifyRepository, playlist: Playlist, onBack: () -> Unit) {
     var ui by remember { mutableStateOf<TracksUi>(TracksUi.Loading) }
+    var query by remember { mutableStateOf("") }
+    var sort by remember { mutableStateOf(TrackSort.NONE) }
+    var sortMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(playlist.id) {
         ui = try {
@@ -83,10 +91,41 @@ fun TracksScreen(repository: ISpotifyRepository, playlist: Playlist, onBack: () 
             }
 
             is TracksUi.Data -> {
+                val displayed = remember(state.tracks, query, sort) {
+                    state.tracks.filter { t ->
+                        query.isBlank() ||
+                            t.title.contains(query, ignoreCase = true) ||
+                            t.artist.contains(query, ignoreCase = true) ||
+                            t.album.contains(query, ignoreCase = true)
+                    }.let { sort.apply(it) }
+                }
                 val stats = PlaylistStats(
-                    trackCount = state.tracks.size,
-                    totalDurationMs = state.tracks.sumOf { it.durationMs.toLong() },
+                    trackCount = displayed.size,
+                    totalDurationMs = displayed.sumOf { it.durationMs.toLong() },
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Filtruj (tytuł/artysta/album)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box {
+                        OutlinedButton(onClick = { sortMenu = true }) { Text("Sortuj: ${sort.label}") }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            TrackSort.entries.forEach { s ->
+                                DropdownMenuItem(text = { Text(s.label) }, onClick = { sort = s; sortMenu = false })
+                            }
+                        }
+                    }
+                }
+
                 Text(
                     "${stats.trackCount} utworów · ${stats.formattedDuration()}",
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -95,7 +134,7 @@ fun TracksScreen(repository: ISpotifyRepository, playlist: Playlist, onBack: () 
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                    itemsIndexed(state.tracks) { index, track ->
+                    itemsIndexed(displayed) { index, track ->
                         TrackRow(index + 1, track)
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
                     }
@@ -130,5 +169,23 @@ private fun TrackRow(position: Int, track: Track) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+private enum class TrackSort(val label: String) {
+    NONE("Oryginalna"),
+    TITLE("Tytuł"),
+    ARTIST("Artysta"),
+    ALBUM("Album"),
+    DURATION("Czas"),
+    POPULARITY("Popularność");
+
+    fun apply(tracks: List<Track>): List<Track> = when (this) {
+        NONE -> tracks
+        TITLE -> tracks.sortedBy { it.title.lowercase() }
+        ARTIST -> tracks.sortedBy { it.artist.lowercase() }
+        ALBUM -> tracks.sortedBy { it.album.lowercase() }
+        DURATION -> tracks.sortedBy { it.durationMs }
+        POPULARITY -> tracks.sortedByDescending { it.popularity }
     }
 }
