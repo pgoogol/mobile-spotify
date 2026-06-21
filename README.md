@@ -143,21 +143,21 @@ Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
 - **Generator playlist** (zakładka „Generator") na prawdziwych playlistach:
   wybór playlisty źródłowej, strategii i liczby utworów → generowanie przez
   `GeneratePlaylistUseCase` z `:shared` → **zapis nowej playlisty na Spotify**.
+- **Import cech audio z CSV** (przycisk w generatorze) — ten sam `CsvParser` co
+  na Androidzie; zasila krzywe energii rzeczywistymi danymi (BPM/energia/valence).
 - **Demo generatora** (zakładka „Demo") na wbudowanej puli `SampleData` —
   pokazuje krzywe energii bez logowania.
 
 Warstwa sieci/repozytorium używa Retrofit/OkHttp/Gson (działają na JVM) i
 mapuje DTO z `:shared` na modele domenowe — tak samo jak `:app`. Cała logika
-generowania (`GeneratePlaylistUseCase`, `EnergyCurveCalculator`) jest
-współdzielona — mieszka w `src/jvmShared`.
+generowania (`GeneratePlaylistUseCase`, `EnergyCurveCalculator`, `CsvParser`)
+jest współdzielona — mieszka w `src/jvmShared`.
 
-> Jakość krzywych energii zależy od **cech audio** (BPM/energia/…). Na
-> desktopie cechy nie są jeszcze importowane, więc strategie inne niż „Brak"
-> dają płaski wynik do czasu dodania importu CSV (patrz niżej).
+> Bez zaimportowanych cech audio strategie inne niż „Brak" dają płaski wynik —
+> użyj **„Importuj CSV"** w generatorze, aby krzywe działały na rzeczywistych danych.
 
 ### Następne kroki (do rozbudowy)
 
-- **Import cech audio z CSV** (jak na Androidzie) → pełna jakość krzywych.
 - Sortowanie/filtrowanie na ekranie utworów.
 - Generator **wielu źródeł** naraz (obecnie jedno źródło na rundę).
 - Port **trybu DJ / Impreza** (plan + live).

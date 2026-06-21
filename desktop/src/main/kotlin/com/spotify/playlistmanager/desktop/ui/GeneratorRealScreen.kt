@@ -34,13 +34,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.spotify.playlistmanager.data.csv.CsvParser
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
+import com.spotify.playlistmanager.desktop.data.CsvImport
 import com.spotify.playlistmanager.desktop.data.SpotifyClient
 import com.spotify.playlistmanager.desktop.theme.SpotifyGreen
 import com.spotify.playlistmanager.domain.model.EnergyCurve
 import com.spotify.playlistmanager.domain.model.GenerateResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -68,6 +72,7 @@ fun GeneratorRealScreen(client: SpotifyClient) {
 
     var playlistMenu by remember { mutableStateOf(false) }
     var strategyMenu by remember { mutableStateOf(false) }
+    var featuresInfo by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         runCatching { client.repository.getUserPlaylists() }
@@ -108,6 +113,21 @@ fun GeneratorRealScreen(client: SpotifyClient) {
                 busy = false
                 status = "Zapisano playlistę na Spotify ✓ ($count utworów)"
             }.onFailure { busy = false; status = "Błąd zapisu: ${it.message}" }
+        }
+    }
+
+    fun importCsv() {
+        val file = CsvImport.pickFile() ?: return
+        busy = true
+        scope.launch {
+            runCatching {
+                val parsed = withContext(Dispatchers.IO) { file.inputStream().use { CsvParser.parse(it) } }
+                client.featuresRepository.upsert(parsed.features)
+                parsed
+            }.onSuccess {
+                busy = false
+                featuresInfo = "Zaimportowano ${it.features.size} cech audio (pominięto ${it.skipped})"
+            }.onFailure { busy = false; featuresInfo = "Błąd importu CSV: ${it.message}" }
         }
     }
 
@@ -181,6 +201,21 @@ fun GeneratorRealScreen(client: SpotifyClient) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedButton(onClick = { importCsv() }, enabled = !busy) {
+                            Text("Importuj CSV (cechy audio)")
+                        }
+                        featuresInfo?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
 
