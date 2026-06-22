@@ -1,8 +1,10 @@
 package com.spotify.playlistmanager.desktop.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,8 +28,15 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -75,6 +84,7 @@ import com.spotify.playlistmanager.data.model.TrackAudioFeatures
 import com.spotify.playlistmanager.desktop.data.CsvImport
 import com.spotify.playlistmanager.desktop.data.LIKED_ID
 import com.spotify.playlistmanager.desktop.data.SpotifyClient
+import com.spotify.playlistmanager.desktop.theme.ErrorRed
 import com.spotify.playlistmanager.desktop.theme.SpotifyAmber
 import com.spotify.playlistmanager.desktop.theme.SpotifyGreen
 import com.spotify.playlistmanager.domain.dj.LiveAssistant
@@ -87,9 +97,11 @@ import com.spotify.playlistmanager.domain.dj.model.PartyState
 import com.spotify.playlistmanager.domain.dj.model.Preset
 import com.spotify.playlistmanager.domain.dj.model.Style
 import com.spotify.playlistmanager.domain.dj.model.StyleRatio
+import com.spotify.playlistmanager.domain.model.CompositeScoreCalculator
 import com.spotify.playlistmanager.domain.model.NextTrackTarget
 import com.spotify.playlistmanager.domain.model.ScoreAxis
 import com.spotify.playlistmanager.domain.usecase.SuggestNextTrackUseCase
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,7 +127,78 @@ internal data class SessionTrack(
     val targetLabel: String,
     val bpm: Float?,
     val camelot: String?,
+    /** Cel energii użyty przy wyborze — potrzebny do SWAP (Absolute target). */
+    val targetScore: Float = score,
+    /** Oś, na której utwór był wybrany — potrzebna do SWAP. */
+    val axis: ScoreAxis = ScoreAxis.DANCE,
+    /**
+     * True gdy utwór jest „kotwicą" — załadowany z istniejącej playlisty
+     * (tryb APPEND). Kotwice są blokowane przed usunięciem przez Undo i nie
+     * są zapisywane ponownie do Spotify (bo już tam są).
+     */
+    val isAnchor: Boolean = false,
 )
+
+/**
+ * Struktura tandy: ile utworów z puli A, potem ile z B (auto-switch).
+ * Gdy null — ręczne przełączanie (user klika „Aktywuj").
+ */
+internal data class TandaStructure(val countA: Int, val countB: Int) {
+    val totalPerTanda: Int get() = countA + countB
+}
+
+/** Licznik postępu w bieżącym bloku tandy. */
+internal data class TandaCounter(
+    val progressInCurrentBlock: Int = 0,
+    /** Numer tandy (1-indexed). */
+    val tandaNumber: Int = 1,
+)
+
+/** Konfiguracja trybu APPEND — docelowa playlista do dopisania utworów. */
+internal data class AppendMode(
+    val playlistId: String,
+    val playlistName: String,
+    val originalTrackCount: Int,
+)
+
+/**
+ * Snapshot stanu przed auto-fill tandy — do cofnięcia całej grupy.
+ * Gdy non-null, UI pokazuje baner potwierdzenia „auto-wypełniono tandę".
+ */
+internal data class AutoFillSnapshot(
+    val preSession: List<SessionTrack>,
+    val preCounter: TandaCounter,
+    val preActivePool: ActivePool,
+    val addedCount: Int,
+)
+
+/** Stan dialogu „dodaj utwór z dowolnej playlisty" (duplikaty dozwolone). */
+internal data class ManualTrackPicker(
+    val playlist: Playlist? = null,
+    val tracks: List<Track> = emptyList(),
+    val isLoading: Boolean = false,
+)
+
+/** Stan podglądu szczegółów utworu (dialog). Features doładowywane async. */
+internal data class TrackDetailState(
+    val track: Track,
+    val features: TrackAudioFeatures? = null,
+)
+
+/**
+ * Stan wymiany pojedynczego utworu w sesji (SWAP).
+ * Idle → (Loading | Picking | Error). Loading/Picking trzymają indeks w `session`.
+ */
+internal sealed interface SwapState {
+    data object Idle : SwapState
+    data class Loading(val sessionIndex: Int) : SwapState
+    data class Picking(
+        val sessionIndex: Int,
+        val original: SessionTrack,
+        val candidates: List<SuggestNextTrackUseCase.Candidate>,
+    ) : SwapState
+    data class Error(val message: String) : SwapState
+}
 
 /** Trzy tryby pracy ekranu „Krok" — zakładki w UI. */
 internal enum class GeneratorMode(val displayName: String) {
@@ -191,6 +274,19 @@ fun PartyPlannerScreen(client: SpotifyClient) {
     // ── Stan trybu Live ─────────────────────────────────────────────────
     var livePreset by remember { mutableStateOf<Preset?>(null) }
 
+    // ── Stan zaawansowany (parytet z mobile StepwiseScreen) ─────────────
+    var appendMode by remember { mutableStateOf<AppendMode?>(null) }
+    var loadingAnchors by remember { mutableStateOf(false) }
+    var anchorsDirty by remember { mutableStateOf(false) } // podmieniono kotwicę → nadpisz playlistę
+    var tandaStructure by remember { mutableStateOf<TandaStructure?>(null) }
+    var tandaCounter by remember { mutableStateOf(TandaCounter()) }
+    var autoFillSnapshot by remember { mutableStateOf<AutoFillSnapshot?>(null) }
+    var autoFilling by remember { mutableStateOf(false) }
+    var weights by remember { mutableStateOf(SuggestNextTrackUseCase.Weights.DEFAULT) }
+    var manualPicker by remember { mutableStateOf<ManualTrackPicker?>(null) }
+    var trackDetail by remember { mutableStateOf<TrackDetailState?>(null) }
+    var swapState by remember { mutableStateOf<SwapState>(SwapState.Idle) }
+
     // Cache analizy puli (poolA + poolB) — invalidowany przy zmianie pul.
     var analyzedByStyle by remember { mutableStateOf<Map<Style, List<AnalyzedTrack>>>(emptyMap()) }
     // Cache cech audio dla metadanych w trybie Krok.
@@ -198,6 +294,16 @@ fun PartyPlannerScreen(client: SpotifyClient) {
 
     fun pickedIds(): Set<String> = session.mapNotNull { it.track.id }.toSet()
     fun activeSlot(): PoolSlot = if (activePool == ActivePool.A) poolA else (poolB ?: PoolSlot())
+    fun hasPoolB(): Boolean = poolB != null
+    fun newSession(): List<SessionTrack> = session.filter { !it.isAnchor }
+    fun canSave(): Boolean = (newSession().isNotEmpty() || (appendMode != null && anchorsDirty)) && !busy
+    fun tandaLimit(pool: ActivePool): Int =
+        tandaStructure?.let { if (pool == ActivePool.A) it.countA else it.countB } ?: 0
+    fun remainingInBlock(): Int =
+        tandaStructure?.let { (tandaLimit(activePool) - tandaCounter.progressInCurrentBlock).coerceAtLeast(0) } ?: 0
+    fun canAutoFill(): Boolean =
+        tandaStructure != null && remainingInBlock() > 0 && candidates.isNotEmpty() &&
+            autoFillSnapshot == null && !autoFilling
 
     // ── Ładowanie playlist (z syntetycznym „Polubione") ─────────────────
     LaunchedEffect(Unit) {
@@ -239,6 +345,7 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                     target = currentTarget,
                     currentAxis = currentAxis,
                     k = SuggestNextTrackUseCase.DEFAULT_K,
+                    weights = weights,
                 )
             }.onSuccess { s ->
                 candidates = s.candidates
@@ -310,29 +417,334 @@ fun PartyPlannerScreen(client: SpotifyClient) {
             targetLabel = labelFor(currentTarget),
             bpm = f?.bpm,
             camelot = f?.camelot,
+            targetScore = resolvedScore,
+            axis = c.scoreAxis,
         )
         currentAxis = c.scoreAxis
         currentTarget = NextTrackTarget.Hold
+
+        // TANDA auto-switch — gdy zapełniono blok aktywnej puli, przełącz pulę.
+        val structure = tandaStructure
+        if (structure != null && poolB != null) {
+            val advanced = tandaCounter.copy(progressInCurrentBlock = tandaCounter.progressInCurrentBlock + 1)
+            val limit = if (activePool == ActivePool.A) structure.countA else structure.countB
+            if (advanced.progressInCurrentBlock >= limit) {
+                val next = if (activePool == ActivePool.A) ActivePool.B else ActivePool.A
+                activePool = next
+                tandaCounter = TandaCounter(
+                    progressInCurrentBlock = 0,
+                    tandaNumber = if (next == ActivePool.A) advanced.tandaNumber + 1 else advanced.tandaNumber,
+                )
+            } else {
+                tandaCounter = advanced
+            }
+        } else if (structure != null) {
+            tandaCounter = tandaCounter.copy(progressInCurrentBlock = tandaCounter.progressInCurrentBlock + 1)
+        }
         recomputeCandidates()
     }
 
     fun undoLast() {
-        if (session.isEmpty()) return
-        session = session.dropLast(1)
-        // Uproszczenie wobec :app — oś resetujemy do domyślnej (SessionTrack
-        // na desktopie nie przechowuje osi wyboru).
-        currentAxis = ScoreAxis.DANCE
+        // W trybie APPEND nie cofamy kotwic — usuwamy ostatni nie-kotwicowy.
+        val lastIdx = session.indexOfLast { !it.isAnchor }
+        if (lastIdx < 0) return
+        session = session.toMutableList().apply { removeAt(lastIdx) }
+        currentAxis = session.lastOrNull()?.axis ?: ScoreAxis.DANCE
+        // Uproszczenie wobec :app: licznik resetujemy do 0 w bieżącym bloku.
+        tandaCounter = TandaCounter(progressInCurrentBlock = 0, tandaNumber = tandaCounter.tandaNumber)
         recomputeCandidates()
     }
 
     fun clearSession() {
-        session = emptyList()
+        // W trybie APPEND zachowujemy kotwice.
+        session = session.filter { it.isAnchor }
         currentTarget = NextTrackTarget.Hold
-        currentAxis = ScoreAxis.DANCE
+        currentAxis = session.lastOrNull()?.axis ?: ScoreAxis.DANCE
         activePool = ActivePool.A
+        tandaCounter = TandaCounter()
+        autoFillSnapshot = null
         status = null
         recomputeCandidates()
     }
+
+    // ── TANDA: auto-fill reszty bloku (baner „auto-wypełniono tandę") ────
+
+    fun autoFillBlock() {
+        if (!canAutoFill()) return
+        val snapshot = AutoFillSnapshot(
+            preSession = session,
+            preCounter = tandaCounter,
+            preActivePool = activePool,
+            addedCount = 0,
+        )
+        autoFilling = true
+        scope.launch {
+            val remaining = remainingInBlock()
+            var added = 0
+            repeat(remaining) {
+                val slot = activeSlot()
+                if (slot.playlist == null || slot.tracks.isEmpty()) return@repeat
+                val lastPicked = session.lastOrNull { it.pool == activePool }?.track
+                val suggestion = runCatching {
+                    suggestUseCase.suggest(
+                        pool = slot.tracks,
+                        alreadyPickedIds = pickedIds(),
+                        lastPickedTrack = lastPicked,
+                        target = currentTarget,
+                        currentAxis = currentAxis,
+                        k = 1,
+                        weights = weights,
+                    )
+                }.getOrNull() ?: return@repeat
+                val top = suggestion.candidates.firstOrNull() ?: return@repeat
+                val f = top.track.id?.let { featuresMap[it] }
+                session = session + SessionTrack(
+                    track = top.track,
+                    pool = activePool,
+                    score = top.score,
+                    targetLabel = "${labelFor(currentTarget)} (auto)",
+                    bpm = f?.bpm,
+                    camelot = f?.camelot,
+                    targetScore = suggestion.resolvedTargetScore,
+                    axis = top.scoreAxis,
+                )
+                currentAxis = top.scoreAxis
+                tandaCounter = tandaCounter.copy(progressInCurrentBlock = tandaCounter.progressInCurrentBlock + 1)
+                added++
+            }
+            if (added == 0) { autoFilling = false; return@launch }
+
+            // Po zapełnieniu — przełącz pulę gdy osiągnięto limit.
+            val limit = tandaLimit(activePool)
+            val shouldSwitch = tandaCounter.progressInCurrentBlock >= limit && poolB != null
+            if (shouldSwitch) {
+                val next = if (activePool == ActivePool.A) ActivePool.B else ActivePool.A
+                tandaCounter = TandaCounter(
+                    progressInCurrentBlock = 0,
+                    tandaNumber = if (next == ActivePool.A) tandaCounter.tandaNumber + 1 else tandaCounter.tandaNumber,
+                )
+                activePool = next
+            }
+            currentTarget = NextTrackTarget.Hold
+            autoFillSnapshot = snapshot.copy(addedCount = added)
+            autoFilling = false
+            recomputeCandidates()
+        }
+    }
+
+    fun acceptAutoFill() { autoFillSnapshot = null }
+
+    fun undoAutoFill() {
+        val snap = autoFillSnapshot ?: return
+        session = snap.preSession
+        tandaCounter = snap.preCounter
+        activePool = snap.preActivePool
+        currentAxis = session.lastOrNull()?.axis ?: ScoreAxis.DANCE
+        autoFillSnapshot = null
+        recomputeCandidates()
+    }
+
+    fun setTandaStructure(structure: TandaStructure?) {
+        val oldWasNull = tandaStructure == null
+        val newIsNull = structure == null
+        tandaStructure = structure
+        tandaCounter = if (oldWasNull != newIsNull) {
+            TandaCounter()
+        } else if (structure != null) {
+            val limit = if (activePool == ActivePool.A) structure.countA else structure.countB
+            tandaCounter.copy(progressInCurrentBlock = tandaCounter.progressInCurrentBlock.coerceAtMost(limit))
+        } else {
+            tandaCounter
+        }
+    }
+
+    // ── APPEND: kontynuacja istniejącej playlisty (kotwice) ─────────────
+
+    fun enableAppendMode(playlist: Playlist) {
+        if (playlist.id == LIKED_ID) {
+            status = "Nie można dopisywać do Polubionych — wybierz zwykłą playlistę."
+            return
+        }
+        loadingAnchors = true
+        anchorsDirty = false
+        autoFillSnapshot = null
+        session = emptyList()
+        tandaCounter = TandaCounter()
+        scope.launch {
+            val tracks = runCatching { client.repository.getPlaylistTracks(playlist.id) }
+                .onFailure { loadingAnchors = false; status = "Nie udało się pobrać utworów playlisty: ${it.message}" }
+                .getOrNull() ?: return@launch
+            val ids = tracks.mapNotNull { it.id }
+            val features = runCatching { client.featuresRepository.getFeaturesMap(ids) }.getOrDefault(emptyMap())
+            session = tracks.map { track ->
+                val f = track.id?.let { features[it] }
+                val score = f?.let { CompositeScoreCalculator.calculate(it, ScoreAxis.DANCE) } ?: 0f
+                SessionTrack(
+                    track = track,
+                    pool = ActivePool.A,
+                    score = score,
+                    targetLabel = "Kotwica",
+                    bpm = f?.bpm,
+                    camelot = f?.camelot,
+                    targetScore = score,
+                    axis = ScoreAxis.DANCE,
+                    isAnchor = true,
+                )
+            }
+            appendMode = AppendMode(playlist.id, playlist.name, tracks.size)
+            currentAxis = session.lastOrNull()?.axis ?: ScoreAxis.DANCE
+            loadingAnchors = false
+            recomputeCandidates()
+        }
+    }
+
+    fun disableAppendMode() {
+        appendMode = null
+        anchorsDirty = false
+        autoFillSnapshot = null
+        session = session.filter { !it.isAnchor }
+        tandaCounter = TandaCounter()
+        recomputeCandidates()
+    }
+
+    // ── MANUAL PICKER: dodaj utwór z DOWOLNEJ playlisty (duplikaty OK) ──
+
+    fun openManualPicker() { manualPicker = ManualTrackPicker() }
+    fun closeManualPicker() { manualPicker = null }
+
+    fun selectManualPickerPlaylist(playlist: Playlist) {
+        manualPicker = ManualTrackPicker(playlist = playlist, isLoading = true)
+        scope.launch {
+            val tracks = runCatching { loadTracks(playlist) }
+                .onFailure { manualPicker = null; status = "Nie udało się pobrać utworów: ${it.message}" }
+                .getOrNull() ?: return@launch
+            manualPicker = ManualTrackPicker(playlist = playlist, tracks = tracks, isLoading = false)
+        }
+    }
+
+    fun pickTrackFromAnyPlaylist(track: Track) {
+        scope.launch {
+            val f = track.id?.let { id ->
+                featuresMap[id] ?: runCatching { client.featuresRepository.getFeaturesMap(listOf(id)) }
+                    .getOrNull()?.get(id)
+            }
+            val score = f?.let { CompositeScoreCalculator.calculate(it, currentAxis) } ?: 0f
+            session = session + SessionTrack(
+                track = track,
+                pool = activePool,
+                score = score,
+                targetLabel = "Z innej playlisty",
+                bpm = f?.bpm,
+                camelot = f?.camelot,
+                targetScore = score,
+                axis = currentAxis,
+            )
+            manualPicker = null
+        }
+    }
+
+    // ── SWAP: podmiana wybranego utworu na innego kandydata z puli ──────
+
+    suspend fun findSwapCandidates(sessionIndex: Int, k: Int): Result<List<SuggestNextTrackUseCase.Candidate>> {
+        val original = session.getOrNull(sessionIndex)
+            ?: return Result.failure(IllegalStateException("Utwór poza zakresem"))
+        val poolSlot = if (original.pool == ActivePool.A) poolA else poolB
+        val pool = poolSlot?.tracks.orEmpty()
+        if (pool.isEmpty()) {
+            return Result.failure(IllegalStateException("Pula ${original.pool.name} jest pusta — wybierz playlistę źródłową"))
+        }
+        val previous = session.getOrNull(sessionIndex - 1)?.track
+        val excludeIds = session.mapNotNull { it.track.id }.toSet()
+        return runCatching {
+            suggestUseCase.suggest(
+                pool = pool,
+                alreadyPickedIds = excludeIds,
+                lastPickedTrack = previous,
+                target = NextTrackTarget.Absolute(original.targetScore, original.axis),
+                currentAxis = original.axis,
+                k = k,
+                weights = weights,
+            ).candidates
+        }
+    }
+
+    suspend fun applySwap(sessionIndex: Int, candidate: SuggestNextTrackUseCase.Candidate) {
+        val f = candidate.track.id?.let { id ->
+            featuresMap[id] ?: runCatching { client.featuresRepository.getFeaturesMap(listOf(id)) }
+                .getOrNull()?.get(id)
+        }
+        val list = session.toMutableList()
+        val original = list.getOrNull(sessionIndex) ?: return
+        list[sessionIndex] = original.copy(
+            track = candidate.track,
+            score = candidate.score,
+            axis = candidate.scoreAxis,
+            bpm = f?.bpm,
+            camelot = f?.camelot,
+            targetLabel = if (original.isAnchor) "Kotwica (wymieniona)" else "${original.targetLabel} → wymieniony",
+        )
+        session = list
+        if (original.isAnchor) anchorsDirty = true
+    }
+
+    fun swapAuto(sessionIndex: Int) {
+        if (session.getOrNull(sessionIndex) == null) return
+        swapState = SwapState.Loading(sessionIndex)
+        scope.launch {
+            val candidates = findSwapCandidates(sessionIndex, k = 1).getOrElse {
+                swapState = SwapState.Error(it.message ?: "Błąd wyszukiwania zamiennika"); return@launch
+            }
+            val best = candidates.firstOrNull()
+            if (best == null) {
+                swapState = SwapState.Error("Brak innych utworów w puli do wymiany"); return@launch
+            }
+            applySwap(sessionIndex, best)
+            swapState = SwapState.Idle
+            status = "Wymieniono na „${best.track.title}”"
+        }
+    }
+
+    fun swapPick(sessionIndex: Int) {
+        val original = session.getOrNull(sessionIndex) ?: return
+        swapState = SwapState.Loading(sessionIndex)
+        scope.launch {
+            val candidates = findSwapCandidates(sessionIndex, k = 12).getOrElse {
+                swapState = SwapState.Error(it.message ?: "Błąd wyszukiwania zamiennika"); return@launch
+            }
+            if (candidates.isEmpty()) {
+                swapState = SwapState.Error("Brak innych utworów w puli do wymiany"); return@launch
+            }
+            swapState = SwapState.Picking(sessionIndex, original, candidates)
+        }
+    }
+
+    fun confirmSwap(candidate: SuggestNextTrackUseCase.Candidate) {
+        val picking = swapState as? SwapState.Picking ?: return
+        scope.launch {
+            applySwap(picking.sessionIndex, candidate)
+            swapState = SwapState.Idle
+            status = "Wymieniono na „${candidate.track.title}”"
+        }
+    }
+
+    fun cancelSwap() { swapState = SwapState.Idle }
+
+    // ── TRACK DETAIL: podgląd szczegółów (z doładowaniem cech) ──────────
+
+    fun showTrackDetail(track: Track) {
+        val cached = track.id?.let { featuresMap[it] }
+        trackDetail = TrackDetailState(track, cached)
+        if (cached != null || track.id == null) return
+        val id = track.id
+        scope.launch {
+            val fetched = runCatching { client.featuresRepository.getFeaturesMap(listOf(id)) }
+                .getOrNull()?.get(id)
+            val current = trackDetail
+            if (current != null && current.track.id == id) trackDetail = current.copy(features = fetched)
+        }
+    }
+
+    fun closeTrackDetail() { trackDetail = null }
 
     // ── Plan: generuj wszystkie bloki ───────────────────────────────────
 
@@ -433,21 +845,47 @@ fun PartyPlannerScreen(client: SpotifyClient) {
     // ── Zapis na Spotify ────────────────────────────────────────────────
 
     fun save() {
+        if (!canSave()) return
         busy = true
         scope.launch {
+            val append = appendMode
+            // Podmieniono kotwicę → nadpisz całą playlistę (kotwice + nowe).
+            val rewriteWhole = append != null && anchorsDirty
+            val newUris = newSession().mapNotNull { it.track.uri }
+            val urisToSend = if (rewriteWhole) session.mapNotNull { it.track.uri } else newUris
             runCatching {
-                val uris = session.mapNotNull { it.track.uri }
-                require(uris.isNotEmpty()) { "Brak utworów z URI do zapisania." }
-                val name = when (mode) {
-                    GeneratorMode.PLAN -> "Impreza · ${arc.displayName} · salsa $salsaPercent%"
-                    GeneratorMode.LIVE -> "Sesja Live DJ"
-                    GeneratorMode.STEPWISE -> "Sesja DJ — krok po kroku"
+                require(urisToSend.isNotEmpty()) { "Brak utworów z URI do zapisania." }
+                when {
+                    append != null && rewriteWhole -> {
+                        client.repository.replacePlaylistTracks(append.playlistId, urisToSend)
+                        "Zaktualizowano playlistę „${append.playlistName}” ✓ (${urisToSend.size} utworów)"
+                    }
+                    append != null -> {
+                        client.repository.addTracksToPlaylist(append.playlistId, urisToSend)
+                        "Dopisano do „${append.playlistName}” ✓ (${urisToSend.size} utworów)"
+                    }
+                    else -> {
+                        val name = when (mode) {
+                            GeneratorMode.PLAN -> "Impreza · ${arc.displayName} · salsa $salsaPercent%"
+                            GeneratorMode.LIVE -> "Sesja Live DJ"
+                            GeneratorMode.STEPWISE -> "Sesja DJ — krok po kroku"
+                        }
+                        val id = client.repository.createPlaylist(name, "Spotify Playlist Manager (desktop) — tryb Krok")
+                        client.repository.addTracksToPlaylist(id, urisToSend)
+                        "Zapisano playlistę na Spotify ✓ (${urisToSend.size} utworów)"
+                    }
                 }
-                val id = client.repository.createPlaylist(name, "Spotify Playlist Manager (desktop) — tryb Krok")
-                client.repository.addTracksToPlaylist(id, uris)
-                uris.size
-            }.onSuccess { busy = false; status = "Zapisano playlistę na Spotify ✓ ($it utworów)" }
-                .onFailure { busy = false; status = "Błąd zapisu: ${it.message}" }
+            }.onSuccess { msg ->
+                busy = false
+                status = msg
+                // Po zapisie append: nowe tracki stają się kotwicami, dirty czyścimy.
+                if (append != null) {
+                    val newTotal = if (rewriteWhole) urisToSend.size else append.originalTrackCount + urisToSend.size
+                    session = session.map { if (it.isAnchor) it else it.copy(isAnchor = true) }
+                    appendMode = append.copy(originalTrackCount = newTotal)
+                    anchorsDirty = false
+                }
+            }.onFailure { busy = false; status = "Błąd zapisu: ${it.message}" }
         }
     }
 
@@ -462,17 +900,21 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Krok — Impreza DJ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     if (session.isNotEmpty()) {
+                        val subtitle = appendMode?.let { "${newSession().size} nowych → ${it.playlistName}" }
+                            ?: "${session.size} utworów w sesji"
                         Text(
-                            "${session.size} utworów w sesji",
+                            subtitle,
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
-                IconButton(onClick = { undoLast() }, enabled = session.isNotEmpty() && !busy) {
+                IconButton(onClick = { undoLast() }, enabled = session.any { !it.isAnchor } && !busy) {
                     Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Cofnij")
                 }
-                IconButton(onClick = { save() }, enabled = session.isNotEmpty() && !busy) {
+                IconButton(onClick = { save() }, enabled = canSave()) {
                     Icon(Icons.Filled.Save, contentDescription = "Zapisz")
                 }
             }
@@ -499,6 +941,17 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Tryb: nowa playlista / dokończ istniejącą (APPEND).
+                item {
+                    StepwiseAppendModeSection(
+                        playlists = playlists,
+                        appendMode = appendMode,
+                        loadingAnchors = loadingAnchors,
+                        onEnable = { enableAppendMode(it) },
+                        onDisable = { disableAppendMode() },
+                    )
+                }
+
                 // Wspólny selektor pul (A + opcjonalnie B).
                 item {
                     StepwisePoolSelectors(
@@ -510,10 +963,23 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                         onSelectB = { selectPool(ActivePool.B, it) },
                         onAddSecond = { if (poolB == null) poolB = PoolSlot() },
                         onRemoveSecond = {
-                            poolB = null; activePool = ActivePool.A; analyzedByStyle = emptyMap(); recomputeCandidates()
+                            poolB = null; activePool = ActivePool.A; tandaStructure = null
+                            tandaCounter = TandaCounter(); analyzedByStyle = emptyMap(); recomputeCandidates()
                         },
                         onSetActive = { activePool = it; recomputeCandidates() },
                     )
+                }
+
+                // Struktura tandy (auto-switch) — tylko gdy są dwie pule.
+                if (hasPoolB()) {
+                    item {
+                        StepwiseTandaStructureSection(
+                            current = tandaStructure,
+                            counter = tandaCounter,
+                            activePool = activePool,
+                            onSetStructure = { setTandaStructure(it) },
+                        )
+                    }
                 }
 
                 // Import cech audio (wymagane do analizy DJ).
@@ -543,12 +1009,22 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                             currentTarget = currentTarget,
                             resolvedScore = resolvedScore,
                             resolvedAxis = resolvedAxis,
+                            axisOfLast = currentAxis,
                             candidates = candidates,
                             computing = computing,
                             poolSelected = activeSlot().playlist != null,
                             hasContext = session.any { it.pool == activePool },
+                            sessionHasContext = session.isNotEmpty(),
+                            canAutoFill = canAutoFill(),
+                            remainingInBlock = remainingInBlock(),
+                            autoFilling = autoFilling,
+                            weights = weights,
                             onTarget = { currentTarget = it; recomputeCandidates() },
                             onPick = { pickCandidate(it) },
+                            onAutoFill = { autoFillBlock() },
+                            onShowDetail = { showTrackDetail(it) },
+                            onUpdateWeight = { upd -> weights = upd(weights); recomputeCandidates() },
+                            onResetWeights = { weights = SuggestNextTrackUseCase.Weights.DEFAULT; recomputeCandidates() },
                         )
                         GeneratorMode.PLAN -> StepwisePlanPanel(
                             durationMin = durationMin,
@@ -578,11 +1054,23 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                 if (busy) item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SpotifyGreen) }
                 status?.let { msg ->
                     item {
+                        val ok = listOf("Zapisano", "Plan", "Dodano", "Dopisano", "Zaktualizowano", "Wymieniono")
+                            .any { msg.startsWith(it) }
                         Text(
                             msg,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (msg.startsWith("Zapisano") || msg.startsWith("Plan") || msg.startsWith("Dodano"))
-                                SpotifyGreen else MaterialTheme.colorScheme.error,
+                            color = if (ok) SpotifyGreen else ErrorRed,
+                        )
+                    }
+                }
+
+                // Baner „auto-wypełniono tandę" (po auto-fill).
+                autoFillSnapshot?.let { snap ->
+                    item {
+                        StepwiseAutoFillBanner(
+                            snapshot = snap,
+                            onAccept = { acceptAutoFill() },
+                            onUndo = { undoAutoFill() },
                         )
                     }
                 }
@@ -608,13 +1096,58 @@ fun PartyPlannerScreen(client: SpotifyClient) {
                 item {
                     StepwiseSessionSection(
                         tracks = session,
+                        swapEnabled = mode == GeneratorMode.LIVE || mode == GeneratorMode.STEPWISE,
+                        swapState = swapState,
                         onUndo = { undoLast() },
                         onClear = { clearSession() },
                         onSave = { save() },
-                        saveEnabled = session.isNotEmpty() && !busy,
+                        onAddFromAnyPlaylist = { openManualPicker() },
+                        onShowDetail = { showTrackDetail(it) },
+                        onSwapAuto = { swapAuto(it) },
+                        onSwapPick = { swapPick(it) },
+                        saveEnabled = canSave(),
                     )
                 }
             }
+        }
+    }
+
+    // ── Dialog: szczegóły utworu ────────────────────────────────────────
+    trackDetail?.let { detail ->
+        StepwiseTrackDetailDialog(
+            track = detail.track,
+            features = detail.features,
+            onDismiss = { closeTrackDetail() },
+        )
+    }
+
+    // ── Dialog: ręczny picker zamiennika (SWAP z listy) ─────────────────
+    (swapState as? SwapState.Picking)?.let { picking ->
+        StepwiseSwapPickerDialog(
+            picking = picking,
+            onPick = { confirmSwap(it) },
+            onShowDetail = { showTrackDetail(it) },
+            onDismiss = { cancelSwap() },
+        )
+    }
+
+    // ── Dialog: ręczny picker z dowolnej playlisty (duplikaty OK) ───────
+    manualPicker?.let { picker ->
+        if (picker.playlist == null) {
+            StepwiseManualPickPlaylistDialog(
+                playlists = playlists,
+                onSelect = { selectManualPickerPlaylist(it) },
+                onDismiss = { closeManualPicker() },
+            )
+        } else {
+            StepwiseManualPickTrackDialog(
+                playlistName = picker.playlist.name,
+                tracks = picker.tracks,
+                isLoading = picker.isLoading,
+                onPick = { pickTrackFromAnyPlaylist(it) },
+                onBack = { openManualPicker() },
+                onDismiss = { closeManualPicker() },
+            )
         }
     }
 }
@@ -780,26 +1313,41 @@ private fun StepwiseStepwisePanel(
     currentTarget: NextTrackTarget,
     resolvedScore: Float,
     resolvedAxis: ScoreAxis,
+    axisOfLast: ScoreAxis,
     candidates: List<SuggestNextTrackUseCase.Candidate>,
     computing: Boolean,
     poolSelected: Boolean,
     hasContext: Boolean,
+    sessionHasContext: Boolean,
+    canAutoFill: Boolean,
+    remainingInBlock: Int,
+    autoFilling: Boolean,
+    weights: SuggestNextTrackUseCase.Weights,
     onTarget: (NextTrackTarget) -> Unit,
     onPick: (SuggestNextTrackUseCase.Candidate) -> Unit,
+    onAutoFill: () -> Unit,
+    onShowDetail: (Track) -> Unit,
+    onUpdateWeight: ((SuggestNextTrackUseCase.Weights) -> SuggestNextTrackUseCase.Weights) -> Unit,
+    onResetWeights: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Resolved target badge.
+        // Resolved target badge (z informacją o zmianie osi vs ostatni).
         StepwiseSectionCard(title = "Dokąd dalej?") {
-            Surface(
-                color = SpotifyGreen.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(50),
-            ) {
-                Text(
-                    "Cel: ${resolvedAxis.name} ${"%.2f".format(resolvedScore)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SpotifyGreen,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = {
+                        Text("Cel: ${resolvedAxis.name} ${"%.2f".format(resolvedScore)}", style = MaterialTheme.typography.labelSmall)
+                    },
+                    colors = AssistChipDefaults.assistChipColors(
+                        disabledContainerColor = SpotifyGreen.copy(alpha = 0.12f),
+                        disabledLabelColor = SpotifyGreen,
+                    ),
                 )
+                if (sessionHasContext && resolvedAxis != axisOfLast) {
+                    Text("(zmiana osi vs ostatni)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             // Siatka mood buttonów 3x2.
             MOOD_BUTTONS.chunked(3).forEach { rowDefs ->
@@ -836,11 +1384,40 @@ private fun StepwiseStepwisePanel(
                 )
                 else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     candidates.forEachIndexed { idx, c ->
-                        StepwiseCandidateRow(rank = idx + 1, candidate = c, onPick = { onPick(c) })
+                        StepwiseCandidateRow(
+                            rank = idx + 1,
+                            candidate = c,
+                            onPick = { onPick(c) },
+                            onShowDetail = { onShowDetail(c.track) },
+                        )
+                    }
+                }
+            }
+
+            // Auto-wypełnij tandę (gdy struktura ustawiona i jest miejsce w bloku).
+            if (canAutoFill || autoFilling) {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onAutoFill,
+                    enabled = canAutoFill,
+                    colors = ButtonDefaults.buttonColors(containerColor = SpotifyGreen.copy(alpha = 0.85f)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (autoFilling) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Uzupełniam…")
+                    } else {
+                        Icon(Icons.Filled.DoneAll, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Uzupełnij tandę ($remainingInBlock)")
                     }
                 }
             }
         }
+
+        // Zaawansowane — dostrojenie wag algorytmu.
+        StepwiseAdvancedWeightsSection(weights = weights, onUpdateWeight = onUpdateWeight, onReset = onResetWeights)
     }
 }
 
@@ -886,40 +1463,102 @@ private fun StepwiseCandidateRow(
     rank: Int,
     candidate: SuggestNextTrackUseCase.Candidate,
     onPick: () -> Unit,
+    onShowDetail: () -> Unit,
 ) {
     val compatChip = when {
         candidate.harmonicCompat >= 0.85f -> "✅"
         candidate.harmonicCompat >= 0.5f -> "⚠"
         else -> "❌"
     }
+    var expanded by remember { mutableStateOf(false) }
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onPick),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(10.dp)) {
-            Surface(color = SpotifyGreen.copy(alpha = 0.15f), shape = CircleShape, modifier = Modifier.size(28.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text("$rank", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = SpotifyGreen)
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(candidate.track.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(candidate.track.artist, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("score %.2f".format(candidate.score), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (!candidate.bpmDelta.isNaN()) {
-                        Spacer(Modifier.width(6.dp))
-                        val delta = candidate.bpmDelta.toInt()
-                        Text("${if (delta > 0) "+" else ""}$delta BPM", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onPick).padding(10.dp),
+            ) {
+                Surface(color = SpotifyGreen.copy(alpha = 0.15f), shape = CircleShape, modifier = Modifier.size(28.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("$rank", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = SpotifyGreen)
                     }
-                    Spacer(Modifier.width(6.dp))
-                    Text(compatChip, fontSize = 12.sp)
                 }
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(candidate.track.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(candidate.track.artist, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("score %.2f".format(candidate.score), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (!candidate.bpmDelta.isNaN()) {
+                            Spacer(Modifier.width(6.dp))
+                            val delta = candidate.bpmDelta.toInt()
+                            Text("${if (delta > 0) "+" else ""}$delta BPM", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Text(compatChip, fontSize = 12.sp)
+                    }
+                }
+                IconButton(onClick = onShowDetail, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Info, contentDescription = "Szczegóły utworu", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = if (expanded) "Zwiń szczegóły" else "Dlaczego ten utwór?",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.Filled.MusicNote, contentDescription = "Dodaj", tint = SpotifyGreen, modifier = Modifier.size(20.dp))
             }
-            Icon(Icons.Filled.MusicNote, contentDescription = "Dodaj", tint = SpotifyGreen, modifier = Modifier.size(20.dp))
+            if (expanded) StepwiseCandidateExplainRow(candidate)
         }
+    }
+}
+
+@Composable
+private fun StepwiseCandidateExplainRow(candidate: SuggestNextTrackUseCase.Candidate) {
+    val bpmJumpNorm = if (!candidate.bpmDelta.isNaN()) {
+        (abs(candidate.bpmDelta) / SuggestNextTrackUseCase.BPM_JUMP_NORMALIZER).coerceIn(0f, 1f)
+    } else 0f
+    val fitCost = SuggestNextTrackUseCase.W_FIT * candidate.fitDistance
+    val harmonicCost = SuggestNextTrackUseCase.W_HARMONIC * (1f - candidate.harmonicCompat)
+    val bpmCost = SuggestNextTrackUseCase.W_BPM_JUMP * bpmJumpNorm
+    Column(
+        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("Dlaczego ten utwór?", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        StepwiseExplainLine("Dopasowanie do celu", "odległość %.2f od targetu".format(candidate.fitDistance), fitCost, SuggestNextTrackUseCase.W_FIT)
+        StepwiseExplainLine("Harmonia (Camelot)", "kompatybilność %.2f".format(candidate.harmonicCompat), harmonicCost, SuggestNextTrackUseCase.W_HARMONIC)
+        StepwiseExplainLine(
+            "Skok BPM",
+            if (candidate.bpmDelta.isNaN()) "brak kontekstu" else "Δ %+d BPM".format(candidate.bpmDelta.toInt()),
+            bpmCost,
+            SuggestNextTrackUseCase.W_BPM_JUMP,
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 2.dp))
+        Row {
+            Text("Koszt łączny", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("%.3f".format(candidate.totalCost), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SpotifyGreen)
+        }
+    }
+}
+
+@Composable
+private fun StepwiseExplainLine(label: String, detail: String, cost: Float, weight: Float) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+        }
+        Text("waga %.1f".format(weight), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+        Spacer(Modifier.width(8.dp))
+        Text("+%.3f".format(cost), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium, color = if (cost > 0.3f) ErrorRed else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1045,21 +1684,41 @@ private fun StepwiseLivePanel(
 //  Sekcja: sesja (lista zbudowanych utworów)
 // ══════════════════════════════════════════════════════════════════════
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun StepwiseSessionSection(
     tracks: List<SessionTrack>,
+    swapEnabled: Boolean,
+    swapState: SwapState,
     onUndo: () -> Unit,
     onClear: () -> Unit,
     onSave: () -> Unit,
+    onAddFromAnyPlaylist: () -> Unit,
+    onShowDetail: (Track) -> Unit,
+    onSwapAuto: (Int) -> Unit,
+    onSwapPick: (Int) -> Unit,
     saveEnabled: Boolean,
 ) {
-    StepwiseSectionCard(title = if (tracks.isEmpty()) "Sesja (pusta)" else "Sesja · ${tracks.size} utworów") {
+    val anchorCount = tracks.count { it.isAnchor }
+    val newCount = tracks.size - anchorCount
+    val title = when {
+        tracks.isEmpty() -> "Sesja (pusta)"
+        anchorCount > 0 -> "Sesja · $newCount nowych + $anchorCount kotwic"
+        else -> "Sesja · $newCount utworów"
+    }
+    StepwiseSectionCard(title = title) {
         if (tracks.isEmpty()) {
             Text(
                 "Wybierz pulę i zacznij budować — przyciskiem nastrojowym, planem albo presetem Live.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(4.dp))
+            TextButton(onClick = onAddFromAnyPlaylist) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Dodaj utwór z playlisty")
+            }
             return@StepwiseSectionCard
         }
         LazyColumn(
@@ -1067,11 +1726,20 @@ private fun StepwiseSessionSection(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             itemsIndexed(tracks) { index, st ->
-                StepwiseSessionRow(number = index + 1, sessionTrack = st)
+                val newNumber = if (st.isAnchor) 0 else tracks.take(index + 1).count { !it.isAnchor }
+                StepwiseSessionRow(
+                    number = newNumber,
+                    sessionTrack = st,
+                    swapEnabled = swapEnabled && !st.isAnchor,
+                    isSwapping = (swapState as? SwapState.Loading)?.sessionIndex == index,
+                    onClick = { onShowDetail(st.track) },
+                    onSwapAuto = { onSwapAuto(index) },
+                    onSwapPick = { onSwapPick(index) },
+                )
             }
         }
         Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
             TextButton(onClick = onUndo) {
                 Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
@@ -1082,7 +1750,11 @@ private fun StepwiseSessionSection(
                 Spacer(Modifier.width(4.dp))
                 Text("Wyczyść sesję")
             }
-            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onAddFromAnyPlaylist) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Z playlisty")
+            }
             Button(
                 onClick = onSave,
                 enabled = saveEnabled,
@@ -1096,17 +1768,40 @@ private fun StepwiseSessionSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StepwiseSessionRow(number: Int, sessionTrack: SessionTrack) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(
-            "$number.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(28.dp),
-        )
+private fun StepwiseSessionRow(
+    number: Int,
+    sessionTrack: SessionTrack,
+    swapEnabled: Boolean,
+    isSwapping: Boolean,
+    onClick: () -> Unit,
+    onSwapAuto: () -> Unit,
+    onSwapPick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+            .let {
+                if (sessionTrack.isAnchor) it.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f), RoundedCornerShape(4.dp))
+                else it
+            }
+            .clickable(onClick = onClick),
+    ) {
+        if (sessionTrack.isAnchor) {
+            Text("📌", fontSize = 12.sp, modifier = Modifier.width(28.dp))
+        } else {
+            Text("$number.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(28.dp))
+        }
         Column(modifier = Modifier.weight(1f)) {
-            Text(sessionTrack.track.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                sessionTrack.track.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = if (sessionTrack.isAnchor) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     sessionTrack.track.artist,
@@ -1127,13 +1822,33 @@ private fun StepwiseSessionRow(number: Int, sessionTrack: SessionTrack) {
             }
         }
         Spacer(Modifier.width(6.dp))
-        Surface(color = poolColor(sessionTrack.pool).copy(alpha = 0.2f), shape = RoundedCornerShape(50)) {
-            Text(
-                sessionTrack.pool.name,
-                style = MaterialTheme.typography.labelSmall,
-                color = poolColor(sessionTrack.pool),
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+        if (!sessionTrack.isAnchor) {
+            Surface(color = poolColor(sessionTrack.pool).copy(alpha = 0.2f), shape = RoundedCornerShape(50)) {
+                Text(
+                    sessionTrack.pool.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = poolColor(sessionTrack.pool),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+        if (swapEnabled) {
+            Spacer(Modifier.width(2.dp))
+            if (isSwapping) {
+                CircularProgressIndicator(strokeWidth = 2.dp, color = SpotifyGreen, modifier = Modifier.padding(9.dp).size(18.dp))
+            } else {
+                Box(
+                    modifier = Modifier.size(36.dp).combinedClickable(onClick = onSwapAuto, onLongClick = onSwapPick),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.SwapHoriz,
+                        contentDescription = "Wymień utwór (przytrzymaj, by wybrać z listy)",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +19,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -31,6 +34,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,7 +45,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.Playlist
 import com.spotify.playlistmanager.data.model.PlaylistSource
 import com.spotify.playlistmanager.data.model.SortOption
@@ -62,11 +68,13 @@ import com.spotify.playlistmanager.domain.model.WaveDirection
  * - hint o braku smooth join (różna oś niż poprzedni segment),
  * - konfigurację Wave (kierunek + półfala) i Stable (poziom energii),
  * - sortowanie (widoczne tylko gdy strategia = Brak),
- * - przełącznik Harmonic Mixing (widoczny tylko gdy strategia ≠ Brak).
+ * - przełącznik Harmonic Mixing (widoczny tylko gdy strategia ≠ Brak),
+ * - przypinanie utworów (pinned tracks) z obsługą cross-playlist — przycisk
+ *   „Przypnij utwory" ([onPinTracks]) otwiera [GeneratePinTrackDialog], a wybrane
+ *   utwory są pokazywane jako chipy z możliwością usunięcia ([onRemovePinnedTrack]).
  *
- * Przypinanie utworów (pinned tracks) jest pominięte — wymaga cross-playlist
- * pickera z osobnym stanem; reszta funkcji odwzorowana 1:1.
- *
+ * @param onPinTracks otwiera dialog przypinania dla tego segmentu.
+ * @param onRemovePinnedTrack usuwa przypięty utwór po jego ID.
  * @param prevScoreAxis oś poprzedniego segmentu (null = brak poprzedniego). Gdy
  *   różni się od osi bieżącego segmentu, pokazujemy hint o twardym przejściu.
  */
@@ -78,6 +86,8 @@ fun PlaylistSourceCard(
     onUpdate: (PlaylistSource) -> Unit,
     onRemove: () -> Unit,
     canRemove: Boolean,
+    onPinTracks: () -> Unit,
+    onRemovePinnedTrack: (String) -> Unit,
     prevScoreAxis: ScoreAxis? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -295,6 +305,74 @@ fun PlaylistSourceCard(
                             checkedThumbColor = SpotifyGreen,
                             checkedTrackColor = SpotifyGreen.copy(alpha = 0.4f),
                         ),
+                    )
+                }
+            }
+
+            // ── Pinned Tracks (cross-playlist) ──────────────────────────────
+            AnimatedVisibility(visible = source.playlist != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        TextButton(
+                            onClick = onPinTracks,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Icon(Icons.Default.PushPin, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Przypnij utwory")
+                        }
+                        if (source.pinnedTracks.isNotEmpty()) {
+                            Text(
+                                "(${source.pinnedTracks.size}/${source.trackCount})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SpotifyGreen,
+                            )
+                        }
+                    }
+
+                    if (source.pinnedTracks.isNotEmpty()) {
+                        PinnedTrackChips(
+                            pinnedTracks = source.pinnedTracks,
+                            onRemove = onRemovePinnedTrack,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Pinned Track Chips ───────────────────────────────────────────────────────
+
+@Composable
+private fun PinnedTrackChips(
+    pinnedTracks: List<PinnedTrackInfo>,
+    onRemove: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        pinnedTracks.chunked(2).forEach { row ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                row.forEach { pinned ->
+                    AssistChip(
+                        onClick = { onRemove(pinned.id) },
+                        label = {
+                            Text(
+                                "📌 ${pinned.title} — ${pinned.artist}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        },
+                        trailingIcon = {
+                            Icon(Icons.Default.Close, "Usuń", modifier = Modifier.size(14.dp))
+                        },
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                 }
             }
