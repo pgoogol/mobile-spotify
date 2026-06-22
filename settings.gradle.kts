@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "SpotifyPlaylistManager"
 include(":app")
 include(":shared")          // ← NOWE
+include(":desktop")         // ← Compose for Desktop (JVM)

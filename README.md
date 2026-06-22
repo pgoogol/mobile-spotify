@@ -1,11 +1,28 @@
-# Spotify Playlist Manager – Android
+# Spotify Playlist Manager
 
-Aplikacja Android przepisana z Pythona (tkinter) na **Kotlin + Jetpack Compose**.
+Aplikacja przepisana z Pythona (tkinter) na **Kotlin + Compose**, dostępna w
+dwóch wariantach dzielących wspólną logikę domenową:
+
+- **Android** (`:app`) – Jetpack Compose + Hilt
+- **Desktop** (`:desktop`) – Compose for Desktop (JVM) — patrz
+  [Wersja desktopowa](#wersja-desktopowa-compose-for-desktop)
 
 ## Architektura
 
 ```
 MVVM + Clean Architecture + Hilt DI
+```
+
+### Moduły (Kotlin Multiplatform)
+
+```
+:shared    – KMP (androidTarget + jvm("desktop"))
+             cała czysta logika domenowa: generator, krzywe energii,
+             composite score, algorytmy DJ, modele
+             └ src/jvmShared/  – kod wspólny dla obu celów JVM
+             └ src/androidMain/ – kod zależny od Androida (Coil, Hilt @Inject)
+:app       – aplikacja Android (konsumuje android target :shared)
+:desktop   – aplikacja desktopowa (konsumuje jvm("desktop") target :shared)
 ```
 
 ```
@@ -81,6 +98,76 @@ lub otwórz projekt w **Android Studio** (Hedgehog+) i kliknij Run.
 **Wymagania:**
 - Android 8.0+ (API 26+)
 - Zainstalowana aplikacja Spotify na urządzeniu
+
+## Wersja desktopowa (Compose for Desktop)
+
+Aplikacja desktopowa (`:desktop`) reużywa **tej samej logiki** co Android —
+moduł `:shared` jest projektem Kotlin Multiplatform z celami `androidTarget()`
+oraz `jvm("desktop")`.
+
+### Uruchomienie
+
+```bash
+./gradlew :desktop:run
+```
+
+Pakiet natywny dla bieżącego systemu (`.dmg` / `.msi` / `.deb`):
+
+```bash
+./gradlew :desktop:packageDistributionForCurrentOS
+```
+
+**Wymagania:** JDK 21.
+
+### Konfiguracja (Redirect URI)
+
+**Client ID** jest już ustawiony w `local.properties` (`spotify.clientId`,
+ten sam klient publiczny co Android). Wystarczy w
+[Spotify Developer Dashboard](https://developer.spotify.com/dashboard) dodać
+**Redirect URI** dla desktopu:
+
+```
+http://127.0.0.1:8888/callback
+```
+
+> Client ID czytany jest w kolejności: `-Dspotify.clientId=...` →
+> `SPOTIFY_CLIENT_ID` (env) → `local.properties` (`spotify.clientId`).
+
+### Co zawiera
+
+- **Logowanie do Spotify** — OAuth 2.0 Authorization Code + PKCE z redirectem
+  na loopback `http://127.0.0.1:8888/callback` (uruchamia lokalny serwer,
+  otwiera przeglądarkę, zapisuje tokeny w `~/.spotify-playlist-manager/`).
+- **Lista playlist** użytkownika + ❤ Polubione — prawdziwe dane z Web API,
+  pobrane przez współdzielony kontrakt `ISpotifyRepository` z `:shared`.
+- **Ekran utworów** — kliknij playlistę, by zobaczyć jej utwory ze
+  statystykami (liczba + łączny czas), **filtrowaniem i sortowaniem**.
+- **Generator playlist** (zakładka „Generator") na prawdziwych playlistach,
+  z obsługą **wielu źródeł** (każde z własną playlistą, strategią i liczbą
+  utworów) → generowanie przez `GeneratePlaylistUseCase` z `:shared` →
+  **zapis nowej playlisty na Spotify**.
+- **Impreza DJ** (zakładka „Impreza DJ") — tryb Plan: wybór puli, czasu,
+  proporcji salsa/bachata i łuku energii → `PartyPlanner`/`TrackAnalyzer` z
+  `:shared` budują plan bloków → zapis na Spotify.
+- **Profil** (zakładka „Profil") — dane konta i top artyści.
+- **Import cech audio z CSV** (przycisk w generatorze i w Imprezie DJ) — ten sam
+  `CsvParser` co na Androidzie; zasila krzywe energii i analizę DJ rzeczywistymi
+  danymi (BPM/energia/valence/genres).
+- **Demo generatora** (zakładka „Demo") na wbudowanej puli `SampleData` —
+  pokazuje krzywe energii bez logowania.
+
+Warstwa sieci/repozytorium używa Retrofit/OkHttp/Gson (działają na JVM) i
+mapuje DTO z `:shared` na modele domenowe — tak samo jak `:app`. Cała logika
+generowania (`GeneratePlaylistUseCase`, `EnergyCurveCalculator`, `CsvParser`)
+jest współdzielona — mieszka w `src/jvmShared`.
+
+> Bez zaimportowanych cech audio strategie inne niż „Brak" dają płaski wynik —
+> użyj **„Importuj CSV"** w generatorze, aby krzywe działały na rzeczywistych danych.
+
+### Następne kroki (do rozbudowy)
+
+- Tryb **Live** Imprezy DJ (na desktopie jest na razie tryb Plan).
+- Wyniesienie warstwy Web API do `:shared` (współdzielonej z `:app`).
 
 ## Funkcjonalności
 
