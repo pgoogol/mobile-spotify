@@ -2,11 +2,13 @@ package com.spotify.playlistmanager.domain.model
 
 import com.spotify.playlistmanager.data.model.PinnedTrackInfo
 import com.spotify.playlistmanager.data.model.SortOption
+import kotlinx.serialization.Serializable
 
 /**
  * Model domenowy szablonu konfiguracji generatora.
  * Nie zalezy od Room — czysty Kotlin.
  */
+@Serializable
 data class GeneratorTemplate(
     val id: Long = 0,
     val name: String,
@@ -19,6 +21,7 @@ data class GeneratorTemplate(
  * Segment (zrodlo) w szablonie — odpowiednik PlaylistSource
  * ale z trwalymi danymi (playlistId/name zamiast obiektow Playlist).
  */
+@Serializable
 data class TemplateSource(
     val position: Int,
     val playlistId: String,

@@ -1,6 +1,7 @@
 package com.spotify.playlistmanager.data.model
 
 import com.spotify.playlistmanager.domain.model.EnergyCurve
+import kotlinx.serialization.Serializable
 
 // ════════════════════════════════════════════════════════════
 //  Spotify Web API – modele odpowiedzi JSON
@@ -111,6 +112,7 @@ data class FollowersRef(val total: Int)
 //  Modele domenowe – bez zależności od Room / Android
 // ════════════════════════════════════════════════════════════
 
+@Serializable
 data class Track(
     val id: String?,
     val title: String,
@@ -176,6 +178,7 @@ data class TopArtist(
 //  Modele generatora playlist
 // ════════════════════════════════════════════════════════════
 
+@Serializable
 data class PinnedTrackInfo(
     val id: String,
     val title: String,

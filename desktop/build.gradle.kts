@@ -33,6 +33,9 @@ dependencies {
     implementation(libs.okhttp.logging)
     implementation(libs.gson)
 
+    // Magazyn szablonów generatora (templates.json) — serializacja modeli z :shared.
+    implementation(libs.kotlinx.serialization.json)
+
     // Adnotacje @Inject/@Singleton na use-case'ach z :shared (obecne w runtime).
     implementation(libs.javax.inject)
 
