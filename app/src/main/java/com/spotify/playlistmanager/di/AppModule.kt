@@ -74,6 +74,11 @@ object AppModule {
             .addInterceptor(loggingInterceptor())
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            // callTimeout obejmuje CAŁE wywołanie (DNS + połączenie + zapis +
+            // odczyt + ewentualne ponowienia przez TokenAuthenticator). Bez tego
+            // żądanie utknięte w fazie nieobjętej connect/read-timeoutem wisiało
+            // w nieskończoność → spinner „ładowania" nigdy nie znika.
+            .callTimeout(60, TimeUnit.SECONDS)
             .build()
 
     @Provides
@@ -106,6 +111,9 @@ object AppModule {
             .addInterceptor(loggingInterceptor())
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            // Twardy limit na całe wywołanie — odświeżenie tokena nie może wisieć
+            // w nieskończoność (inaczej blokuje wątek OkHttp w TokenAuthenticator).
+            .callTimeout(60, TimeUnit.SECONDS)
             .build()
 
     @Provides
