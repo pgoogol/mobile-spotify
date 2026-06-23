@@ -50,6 +50,17 @@ data class PoolSlot(
 enum class ActivePool { A, B }
 
 /**
+ * Wynik analizy jednej puli (playlisty) dla generatora bloków (Plan / Live).
+ * Każda pula to osobna tanda — utwory pochodzą wyłącznie z wybranej dla niej
+ * playlisty, a [style] to dobrany dla niej profil (dominujący gatunek puli,
+ * z fallbackiem A→salsa, B→bachata).
+ */
+data class PoolAnalysis(
+    val style: Style,
+    val tracks: List<AnalyzedTrack>
+)
+
+/**
  * Struktura tandy: ile utworów z puli A, potem ile z B.
  * Gdy null, aplikacja nie przełącza sama (user klika manual toggle).
  */
@@ -251,8 +262,12 @@ data class StepwiseUiState(
 
     // ── Generator bloków (Plan imprezy / Live) ─────────────
     val generatorMode: GeneratorMode = GeneratorMode.STEPWISE,
-    /** Przeanalizowana pula utworów per styl (cache po zmianie poolA/poolB). */
-    val analyzedByStyle: Map<Style, List<AnalyzedTrack>> = emptyMap(),
+    /**
+     * Przeanalizowana pula utworów per PULA (A/B) — cache po zmianie poolA/poolB.
+     * Każda pula = osobna tanda ze swojej playlisty (nie scalamy ani nie dzielimy
+     * po gatunku — to user świadomie wybrał playlistę jako źródło tandy).
+     */
+    val analyzedByPool: Map<ActivePool, PoolAnalysis> = emptyMap(),
     val isAnalyzingPool: Boolean = false,
     /** Plan imprezy — czas trwania w ms (slider 30 min – 6 h). */
     val planDurationMs: Long = 90 * 60_000L,
@@ -499,7 +514,8 @@ class StepwiseViewModel @Inject constructor(
                 poolB = null,
                 activePool = ActivePool.A,
                 tandaStructure = null,
-                tandaCounter = TandaCounter()
+                tandaCounter = TandaCounter(),
+                analyzedByPool = emptyMap()  // invalidate — pula B zniknela
             )
         }
         recomputeCandidates()
@@ -521,13 +537,13 @@ class StepwiseViewModel @Inject constructor(
                 when (which) {
                     ActivePool.A -> current.copy(
                         poolA = current.poolA.copy(tracks = tracks, featuresLoaded = true),
-                        analyzedByStyle = emptyMap()  // invalidate — pula zmienila sie
+                        analyzedByPool = emptyMap()  // invalidate — pula zmienila sie
                     )
                     ActivePool.B -> current.copy(
                         poolB = (current.poolB ?: PoolSlot()).copy(
                             tracks = tracks, featuresLoaded = true
                         ),
-                        analyzedByStyle = emptyMap()
+                        analyzedByPool = emptyMap()
                     )
                 }
             }
@@ -1341,8 +1357,8 @@ class StepwiseViewModel @Inject constructor(
     fun onGeneratorModeChange(mode: GeneratorMode) {
         _state.update { it.copy(generatorMode = mode) }
         // Lazy prefetch — gdy user wchodzi w PLAN/LIVE i nie mamy jeszcze analizy puli
-        if (mode != GeneratorMode.STEPWISE && _state.value.analyzedByStyle.isEmpty()) {
-            viewModelScope.launch { ensureAnalyzedPool() }
+        if (mode != GeneratorMode.STEPWISE && _state.value.analyzedByPool.isEmpty()) {
+            viewModelScope.launch { ensureAnalyzedPools() }
         }
     }
 
@@ -1365,12 +1381,16 @@ class StepwiseViewModel @Inject constructor(
      * Mapowanie: TandaStructure(countA, countB) → blockSize per styl, gdzie
      * A = SALSA, B = BACHATA. Proporcja S:B liczona z tej samej struktury.
      * Bez ustawionej tandy: defaultowy rozmiar bloku 5 i proporcja 50:50.
+     *
+     * Pule planera bierzemy z analizy PER PULA: SALSA = playlista puli A,
+     * BACHATA = playlista puli B (planer przeplata dokladnie te dwie playlisty,
+     * a nie scalony korpus dzielony po gatunku).
      */
     fun onGeneratePlanClick() {
         viewModelScope.launch {
             _state.update { it.copy(isGeneratingPlan = true, error = null) }
-            val analyzed = ensureAnalyzedPool()
-            if (analyzed.values.all { it.isEmpty() }) {
+            val analyzed = ensureAnalyzedPools()
+            if (analyzed.values.all { it.tracks.isEmpty() }) {
                 _state.update { it.copy(isGeneratingPlan = false, error = "Pula pusta — wybierz playliste") }
                 return@launch
             }
@@ -1386,13 +1406,19 @@ class StepwiseViewModel @Inject constructor(
                 )
             } else StyleRatio(salsaPercent = 50)
 
+            // A → SALSA, B → BACHATA: planer przeplata te dwa zrodla.
+            val analyzedByStyle = mapOf(
+                Style.SALSA to (analyzed[ActivePool.A]?.tracks ?: emptyList()),
+                Style.BACHATA to (analyzed[ActivePool.B]?.tracks ?: emptyList())
+            )
+
             val partyState = PartyState(
                 mode = PartyMode.PLANNING,
                 playedTrackIds = s.sessionTracks.mapNotNull { it.track.id }.toSet()
             )
             val plan = partyPlanner.plan(
                 state = partyState,
-                analyzedByStyle = analyzed,
+                analyzedByStyle = analyzedByStyle,
                 durationMs = s.planDurationMs,
                 ratio = ratio,
                 arc = s.energyArc,
@@ -1431,32 +1457,37 @@ class StepwiseViewModel @Inject constructor(
 
     /**
      * Live — wywołuje [LiveAssistant.nextBlock] dla aktywnej puli i dorzuca utwory
-     * do sesji. Pula → styl: A=SALSA, B=BACHATA. Rozmiar bloku z [TandaStructure].
-     * Anchor energii = ostatni SessionTrack tej samej puli (jeśli istnieje).
-     * Auto-switch puli po zbudowaniu bloku (jak w mood-button flow).
+     * do sesji. Źródłem bloku jest AKTYWNA pula (playlista A lub B), nie wykryty
+     * gatunek — dzięki temu kolejne tandy trzymają się swoich playlist. Profil
+     * stylu bierzemy z [PoolAnalysis.style] (dominujący gatunek danej puli).
+     * Rozmiar bloku z [TandaStructure]. Anchor energii = ostatni SessionTrack tej
+     * samej puli (jeśli istnieje). Auto-switch puli po zbudowaniu bloku.
      */
     fun onLivePresetClick(preset: Preset) {
         viewModelScope.launch {
             _state.update { it.copy(isGeneratingLiveBlock = true, livePreset = preset, error = null) }
-            val analyzed = ensureAnalyzedPool()
+            val analyzed = ensureAnalyzedPools()
             val s = _state.value
-            val activeStyle = if (s.activePool == ActivePool.A) Style.SALSA else Style.BACHATA
-            val pool = analyzed[activeStyle].orEmpty()
-            if (pool.isEmpty()) {
+            // Pula bloku = AKTYWNA pula (playlista A lub B), nie wykryty gatunek —
+            // dzieki temu tanda trzyma sie swojej playlisty.
+            val poolAnalysis = analyzed[s.activePool]
+            if (poolAnalysis == null || poolAnalysis.tracks.isEmpty()) {
                 _state.update {
                     it.copy(
                         isGeneratingLiveBlock = false,
-                        error = "Pula dla ${activeStyle.name} pusta (sprawdz wybor playlisty / genres w CSV)"
+                        error = "Pula ${s.activePool.name} pusta — wybierz playliste zrodlowa dla tej puli"
                     )
                 }
                 return@launch
             }
+            val pool = poolAnalysis.tracks
+            val activeStyle = poolAnalysis.style
 
             val tanda = s.tandaStructure
             // Respektuj rozmiar tandy nawet gdy < 3 (np. 2:3). Tylko brak
             // struktury → domyslny rozmiar bloku. Gorny limit 10 zostaje.
             val n = (
-                if (tanda != null) (if (activeStyle == Style.SALSA) tanda.countA else tanda.countB)
+                if (tanda != null) (if (s.activePool == ActivePool.A) tanda.countA else tanda.countB)
                 else PartyPlanner.DEFAULT_BLOCK_SIZE
             ).coerceIn(1, 10)
 
@@ -1514,23 +1545,55 @@ class StepwiseViewModel @Inject constructor(
     }
 
     /**
-     * Cache'owana analiza puli (poolA + poolB) — uruchamiana lazy.
-     * Wynik trafia do `state.analyzedByStyle` i jest invalidowany przy zmianie pul.
+     * Cache'owana analiza pul — uruchamiana lazy. Każdą pulę (A/B) analizujemy
+     * OSOBNO: tanda A czerpie wyłącznie z playlisty puli A, tanda B z playlisty
+     * puli B. Nie scalamy obu pul ani nie dzielimy ich po wykrytym gatunku —
+     * to user świadomie przypisał playlistę do puli jako źródło tandy.
+     *
+     * Wynik trafia do `state.analyzedByPool` i jest invalidowany przy zmianie pul.
      */
-    private suspend fun ensureAnalyzedPool(): Map<Style, List<AnalyzedTrack>> {
-        val cached = _state.value.analyzedByStyle
+    private suspend fun ensureAnalyzedPools(): Map<ActivePool, PoolAnalysis> {
+        val cached = _state.value.analyzedByPool
         if (cached.isNotEmpty()) return cached
 
         _state.update { it.copy(isAnalyzingPool = true) }
         val s = _state.value
-        val combined = (s.poolA.tracks + (s.poolB?.tracks ?: emptyList())).distinctBy { it.id }
-        val ids = combined.mapNotNull { it.id }
+
+        // Features dla obu pul jednym zapytaniem (distinct po id dla cache hitu).
+        val allIds = (s.poolA.tracks + (s.poolB?.tracks ?: emptyList()))
+            .mapNotNull { it.id }
+            .distinct()
         val features = runCatching {
-            featuresRepository.getFeaturesMap(ids)
+            featuresRepository.getFeaturesMap(allIds)
         }.getOrDefault(emptyMap())
-        val result = trackAnalyzer.analyzePool(combined, features)
-        _state.update { it.copy(analyzedByStyle = result, isAnalyzingPool = false) }
+
+        val result = buildMap<ActivePool, PoolAnalysis> {
+            analyzePoolSlot(ActivePool.A, s.poolA.tracks, features)?.let { put(ActivePool.A, it) }
+            s.poolB?.let { b ->
+                analyzePoolSlot(ActivePool.B, b.tracks, features)?.let { put(ActivePool.B, it) }
+            }
+        }
+        _state.update { it.copy(analyzedByPool = result, isAnalyzingPool = false) }
         return result
+    }
+
+    /**
+     * Analizuje jedną pulę (playlistę) jako pojedyncze źródło tandy. Profil stylu
+     * = dominujący wykryty gatunek puli; gdy brak rozpoznania — domyślny dla slotu
+     * (A→salsa, B→bachata). Utwory NIE są odrzucane za brak `genres` — cała wybrana
+     * playlista wchodzi do puli (patrz [TrackAnalyzer.analyzePoolForStyle]).
+     */
+    private fun analyzePoolSlot(
+        which: ActivePool,
+        tracks: List<Track>,
+        features: Map<String, TrackAudioFeatures>
+    ): PoolAnalysis? {
+        if (tracks.isEmpty()) return null
+        val style = trackAnalyzer.dominantStyle(tracks, features)
+            ?: if (which == ActivePool.A) Style.SALSA else Style.BACHATA
+        val analyzed = trackAnalyzer.analyzePoolForStyle(tracks, features, style)
+        if (analyzed.isEmpty()) return null
+        return PoolAnalysis(style = style, tracks = analyzed)
     }
 
     // ── Pomocnicze ──────────────────────────────────────────────────────

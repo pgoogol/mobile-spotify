@@ -5,6 +5,7 @@ import com.spotify.playlistmanager.data.model.TrackAudioFeatures
 import com.spotify.playlistmanager.domain.dj.model.AnalyzedTrack
 import com.spotify.playlistmanager.domain.dj.model.Style
 import com.spotify.playlistmanager.domain.dj.model.StyleProfile
+import com.spotify.playlistmanager.domain.dj.model.Substyle
 
 /**
  * Analizuje surowe utwory ([Track] + [TrackAudioFeatures]) w pule per styl.
@@ -71,6 +72,84 @@ class TrackAnalyzer(
             result[style] = group.map { c -> c.toAnalyzed(profile, popLo, popHi) }
         }
         return result
+    }
+
+    /**
+     * Analizuje pulę pod JEDEN, narzucony [style] — wszystkie utwory dostają
+     * ten sam profil, niezależnie od wykrytego gatunku, a brak `genres` NIE
+     * wyklucza utworu (inaczej niż [analyzePool], które grupuje po gatunku i
+     * pomija utwory bez rozpoznanego stylu).
+     *
+     * Używane gdy źródłem puli jest konkretna playlista wybrana ręcznie przez
+     * użytkownika (pula A / pula B na ekranie Krok). Dzięki temu blok/plan
+     * czerpie dokładnie z tej playlisty (tanda = playlista), zamiast scalać obie
+     * pule i dzielić je z powrotem po gatunku.
+     *
+     * Podstyl nadal wykrywamy z `genres` (potrzebny do `substyle_pen` w funkcji
+     * kosztu), ale gdy wykryty styl nie pasuje do narzuconego — używamy podstylu
+     * domyślnego dla [style].
+     *
+     * Pozostałe kroki (dedup po id, gate śmieci, percentyle popularności,
+     * `passesGate`) są identyczne jak w [analyzePool].
+     */
+    fun analyzePoolForStyle(
+        tracks: List<Track>,
+        featuresMap: Map<String, TrackAudioFeatures>,
+        style: Style
+    ): List<AnalyzedTrack> {
+        val seenIds = mutableSetOf<String>()
+        val candidates = mutableListOf<StyledCandidate>()
+        for (track in tracks) {
+            val id = track.id ?: continue
+            if (!seenIds.add(id)) continue
+            val audio = featuresMap[id] ?: continue
+            if (track.durationMs == 0) continue
+            if (audio.energy < 1f) continue
+            val detection = styleDetector.detect(audio)
+            val substyle = if (detection.style == style) detection.substyle
+            else defaultSubstyleFor(style)
+            candidates += StyledCandidate(
+                track = track,
+                audio = audio,
+                style = style,
+                substyle = substyle,
+                bpmFolded = foldBpm(audio.bpm)
+            )
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val profile = StyleProfile.forStyle(style)
+        val popSorted = candidates.map { it.track.popularity.toFloat() }.sorted()
+        val popLo = Percentiles.percentile(popSorted, 0.05f)
+        val popHi = Percentiles.percentile(popSorted, 0.95f)
+        return candidates.map { c -> c.toAnalyzed(profile, popLo, popHi) }
+    }
+
+    /**
+     * Dominujący (najczęstszy) rozpoznany styl puli — po `genres`. Pozwala
+     * dobrać właściwy [StyleProfile] dla playlisty wybranej przez użytkownika.
+     * Zwraca `null`, gdy żaden utwór nie ma rozpoznawalnego gatunku — wtedy
+     * wołający wybiera domyślny styl puli.
+     */
+    fun dominantStyle(
+        tracks: List<Track>,
+        featuresMap: Map<String, TrackAudioFeatures>
+    ): Style? {
+        val counts = mutableMapOf<Style, Int>()
+        val seen = mutableSetOf<String>()
+        for (track in tracks) {
+            val id = track.id ?: continue
+            if (!seen.add(id)) continue
+            val audio = featuresMap[id] ?: continue
+            val style = styleDetector.detect(audio).style ?: continue
+            counts[style] = (counts[style] ?: 0) + 1
+        }
+        return counts.maxByOrNull { it.value }?.key
+    }
+
+    private fun defaultSubstyleFor(style: Style): Substyle = when (style) {
+        Style.SALSA -> Substyle.SALSA_GENERIC
+        Style.BACHATA -> Substyle.BACHATA
     }
 
     private fun StyledCandidate.toAnalyzed(

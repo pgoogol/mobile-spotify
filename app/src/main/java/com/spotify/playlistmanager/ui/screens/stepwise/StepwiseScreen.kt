@@ -2388,10 +2388,10 @@ private fun LiveInputsSection(
 ) {
     SectionCard(title = "Live — kolejny blok") {
         val styleHint = if (hasPoolB) {
-            "Aktywna pula: ${if (activePool == ActivePool.A) "A (salsa)" else "B (bachata)"} — kliknij preset, " +
-                "blok pójdzie do sesji, pula się przełączy."
+            "Aktywna pula: ${if (activePool == ActivePool.A) "A" else "B"} — kliknij preset, " +
+                "blok (tanda) z tej playlisty pójdzie do sesji, pula się przełączy."
         } else {
-            "Tylko pula A — wszystkie bloki z tego stylu (włącz pulę B by przeplatać)."
+            "Tylko pula A — wszystkie bloki z tej playlisty (włącz pulę B by przeplatać tandy)."
         }
         Text(styleHint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
